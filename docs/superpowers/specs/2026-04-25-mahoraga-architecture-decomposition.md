@@ -82,8 +82,9 @@ NemoClaw, vendored at `vendor/nemoclaw/` as a `git subtree`. Provides agent life
 Three roles, each a long-running containerized Python service:
 
 - **Hunter** — generates strategy hypotheses, proposes mutations to existing strategies, monitors edge decay, drives the autoresearch loop overnight.
-- **Guardian** — stress-tests every candidate strategy, detects portfolio crowding and correlation, enforces gates, can veto Hunter proposals.
+- **Guardian** — stress-tests every candidate strategy (using `synthetic-data` for adversarial scenarios), detects portfolio crowding and correlation, enforces gates, can veto Hunter proposals.
 - **Archivist** — weekly meta-learner; promotes Level-1 raw experiment entries to Level-2 patterns and Level-3 meta-principles; builds the prompt-context pack other agents consume.
+- **Web-research** (Phase 4+) — runs Sunday weekly macro-narrative synthesis. Has a *distinct* sandbox profile with outbound web egress to a fixed allowlist; unlike the other three agents which have no general web egress. Output is published to the `kb-updates` channel as Level-2 / Level-3 KB entries.
 
 Inter-agent communication is exclusively through NemoClaw channels. No direct service-to-service HTTP calls between agents.
 
@@ -100,21 +101,23 @@ Called by agents on demand; do not maintain conversation state:
 ### 3.4 Shared Infrastructure (Layer 4)
 
 - **LiteLLM gateway** — single OpenAI-compatible endpoint translating to Ollama, OpenRouter, Gemini, Anthropic, OpenAI, Grok. All agent inference flows through here.
-- **Ollama** — local inference for Gemma 3 (or whatever local model is current), Apple Silicon Metal acceleration on the host.
-- **NemoClaw internal state** — substrate-private; persisted to a dedicated host volume at `data/nemoclaw-state/` (mounted into the NemoClaw container). Cleanly separated from the vendored source tree at `vendor/nemoclaw/` so the source is read-only by default and `git subtree pull` is unaffected by runtime state.
+- **Ollama** — local inference for Gemma 4 (per project plan), Apple Silicon Metal acceleration on the host. If Gemma 4 is not yet available in Ollama at Phase 0, use the latest Gemma release as interim and upgrade when Gemma 4 lands.
+- **NemoClaw internal state** — substrate-private; persisted to a dedicated host volume at `data/nemoclaw-state/` (mounted into the NemoClaw container). Cleanly separated from the vendored source tree at `vendor/nemoclaw/` so the source is read-only by default and `git subtree pull` is unaffected by runtime state. (NemoClaw may use SQLite internally; that is its private concern, not part of the application data model.)
+
+> **Divergence from project plan:** the plan named ChromaDB for the KB vector store and SQLite for the trade journal. These are consolidated into Postgres + pgvector for operational simplicity (one database to back up, one connection pool, one migration system). SQLite is *only* present if NemoClaw's substrate uses it internally; we do not introduce SQLite for application concerns.
 
 ### 3.5 Storage (Layer 5)
 
 - **Postgres + pgvector** — single application database with logical schemas: `knowledge` (KB Levels 1/2/3 + embeddings), `trades` (trade journal), `experiments` (autoresearch loop metadata), `strategies` (registry pointers and lifecycle state).
 - **Parquet on host volume** — feature store; raw OHLCV and engineered features. Filesystem layout indexed in `experiments` schema.
-- **Git** — strategy registry; every promoted candidate is a commit, with tags marking active / standby / retired.
+- **Git (monorepo)** — strategy registry lives at `strategies/<strategy_id>/strategy.py` in this same repo. **Only promoted strategies** (passed all 5 walls + 3 gates AND improved composite score) are committed; the thousands of nightly experiments are tracked exclusively in Postgres `experiments.iterations` (with mutation diffs stored as columns). This keeps `main` from being polluted by experiment churn while preserving the "git registry with active/standby/retired tags" contract from the project plan. Lifecycle states are git tags (e.g., `strategy/<id>/active`, `strategy/<id>/retired`).
 
 ### 3.6 Observation & Control (Layer 6)
 
 - **Streamlit dashboard** — local web UI showing positions, recent trades, regime state, agent activity.
 - **Telegram bot** — phone-resident control surface; supports commands for kill switch, strategy override, daily reports.
 - **Audit log** — append-only event stream of every decision, every channel message, every order. Backed by Postgres `audit` schema and shipped to local files.
-- **Kill switch** — sub-10-second halt of all trading; physical button surfaced in dashboard and Telegram.
+- **Kill switch** — sub-10-second halt of all trading; prominent button in dashboard and Telegram command. Halt-contract details in §5.6.
 
 ## 4. Component Inventory
 
@@ -122,14 +125,16 @@ Called by agents on demand; do not maintain conversation state:
 
 | Service | Layer | Phase introduced | Language | Notes |
 |---|---|---|---|---|
-| `data-ingest` | 3 | 1 | Python | Alpaca/Polygon connectors, parquet writer |
+| `data-ingest` | 3 | 1 | Python | Free-API-first (yfinance, Alpaca free tier, FRED, Stooq); paid tier (Polygon, Alpaca paid) only if free tier insufficient. 1-minute granularity is acceptable; per-tick is not required. |
 | `regime-detector` | 3 | 1 | Python | MACRO/MESO/MICRO lens implementations |
+| `synthetic-data` | 3 | 2 | Python | Library (not standalone container) called by Guardian and training. Generates GBM with regime switching, jump-diffusion crash scenarios, historical analogue paths. Used for Wall 4 ensemble perturbation, Guardian adversarial tests, weekly scenario simulation. |
 | `hunter` | 2 | 3 | Python | LLM-driven strategy proposer |
-| `guardian` | 2 | 3 | Python | Risk vetoes, gate enforcement |
+| `guardian` | 2 | 3 | Python | Risk vetoes, gate enforcement, adversarial stress testing via `synthetic-data` |
 | `archivist` | 2 | 3 | Python | KB Level promotion, weekly synthesis |
-| `news-classifier` | 3 | 4 | Python | FinBERT or similar; <2s classification |
-| `execution` | 3 | 5 | Python | Order routing, hard-limit enforcement |
-| `training` | 3 | 3 | Python | autoresearch-style loop runner |
+| `web-research` | 2 | 4 | Python | Sunday weekly macro narrative synthesis (Plan §6, §8). Outbound web egress to a fixed allowlist (FRED, SEC EDGAR, Federal Reserve RSS, CME FedWatch, news syndication). Distinct sandbox profile from Hunter/Guardian/Archivist (which have *no* general web egress). |
+| `news-classifier` | 3 | 4 | Python | FinBERT or similar; <2s classification SLA for live shock protocol |
+| `execution` | 3 | 5 | Python | Order routing, hard-limit enforcement, compliance predicates (PDT, wash-sale, SSR) |
+| `training` | 3 | 3 | Python | autoresearch-style loop runner; calls `synthetic-data` for Wall 4 perturbations |
 
 ### 4.2 Vendor dependencies
 
@@ -165,7 +170,7 @@ Standard channels (defined in `infra/nemoclaw-config/channels.yaml`):
 
 ### 5.2 Inference contract (any layer → Layer 4 LiteLLM)
 
-All LLM calls go through LiteLLM via OpenAI-compatible API. Model identifiers are namespaced: `ollama/gemma3:27b`, `anthropic/claude-opus-4-7`, `openrouter/x-ai/grok-2`, etc. Switching providers is a config change, not a code change.
+All LLM calls go through LiteLLM via OpenAI-compatible API. Model identifiers are namespaced: `ollama/gemma4:latest`, `anthropic/claude-opus-4-7`, `openrouter/x-ai/grok-2`, etc. Switching providers is a config change, not a code change.
 
 ### 5.3 Data contract (Layer 3 data-ingest → Layer 5 storage)
 
@@ -174,13 +179,27 @@ All LLM calls go through LiteLLM via OpenAI-compatible API. Model identifiers ar
 - News: JSON-line files at `data/news/{date}.jsonl` plus indexed in Postgres `knowledge.news`
 - Vault embargo enforced at the data-access boundary; the last 6 months of data are not visible to the training loop. Bypass requires an explicit `vault_override` flag that emits an audit-log warning.
 
+> **Wall 2 (data discipline) is an architectural contract**, enforced here at the storage layer. The other four anti-overfitting walls (statistical rigor, complexity control, generalization, meta-awareness) are evaluation predicates run at the training boundary; their internals are specified in `five-wall-fortress-spec.md`.
+
 ### 5.4 Strategy artifact contract (Layer 3 training → Layer 5 git registry)
 
 A strategy is a single `strategy.py` file conforming to the `Strategy` ABC defined in the integration spec. Promotion to the registry is a git commit; the commit message includes parent strategy ID, mutation diff summary, and the FitnessReport hash. Lifecycle states (active / standby / retired) are git tags.
 
-### 5.5 Risk-limit contract (Layer 3 execution boundary)
+### 5.5 Risk-limit & compliance contract (Layer 3 execution boundary)
 
-Hard limits are enforced as predicates in the execution service, not as advisory checks consulted by agents. An order that violates any hard limit is rejected at the execution boundary regardless of which agent submitted it. This is the architectural firewall between the research stack and real capital.
+Hard limits and regulatory compliance predicates are enforced in the execution service, not as advisory checks consulted by agents. An order that violates any hard limit *or* compliance rule is rejected at the execution boundary regardless of which agent submitted it. This is the architectural firewall between the research stack and real capital.
+
+Compliance predicates (Plan §23, FR-4.4) live alongside hard limits and run on every order: PDT pattern-day-trader rule, wash-sale detection (cross-account, 30-day window), short-sale restriction (SSR) flag handling. Detail deferred to `paper-trading-spec.md` (Phase 5); the contract is fixed here: compliance rejection has the same architectural status as hard-limit rejection.
+
+### 5.6 Halt contract (kill switch)
+
+Sub-10-second halt of all trading is a contract every order-emitting service must honor from day one. The mechanism:
+
+- **Primary:** dedicated NemoClaw channel `halt`. Any service can publish a halt event (Telegram bot, dashboard button, Guardian on catastrophic-loss trip, manual operator command). All order-emitting services (`execution`, and any agent that can place orders) subscribe and stop submitting orders within 1 second of receipt.
+- **Fallback:** the execution service additionally polls Postgres `audit.events` for the most recent halt marker every 2 seconds, providing a path independent of channel availability.
+- **Recovery:** halts require explicit human resume via Telegram or dashboard; no automatic recovery. Resume emits a `halt_clear` event on the same channel.
+
+The halt mechanism is testable end-to-end in Phase 0 (substrate bring-up) using a stub order-emitter; full kill-switch UX (Telegram command, dashboard button) is deferred to `governance-spec.md` (Phase 6) but the channel contract is locked here.
 
 ## 6. Phase Milestone Gates
 
@@ -226,6 +245,26 @@ Every channel message, every LLM call, every order, every agent decision is logg
 
 **Cloud (deferred):** Hostinger, CloudFront, or similar. Spec written when needed; Docker Compose translates straightforwardly to a single-VM deployment, with Kubernetes/k3s an option for multi-node scaling.
 
+### 7.5 Deployment posture (two environments)
+
+Two deployment targets, not three. The plan's DEV/STAGING/PROD distinction is collapsed into:
+
+- **DEV (local)** — Apple Silicon MacBook Pro running the full Docker Compose stack. Used for all of Phases 0–4 (substrate bring-up through intelligence layer). Phase 5 paper trading also runs in DEV against Alpaca's *paper* API; the "30 consecutive days of paper trading" Phase 5 exit criterion is satisfied here, not in a separate STAGING environment.
+- **PROD (cloud, deferred)** — Hostinger / CloudFront / similar. Brought online before Phase 7 live trading. Configuration switching via `MAHORAGA_ENV=prod`: connects to Alpaca *live* API, vault-access policy stays read-only-for-training, audit logs ship to durable cloud storage. The actual cloud deployment spec is written when we get to Phase 7 prep, since service composition may evolve during Phases 1–4.
+
+A single environment variable (`MAHORAGA_ENV` ∈ {`dev`, `prod`}) selects broker connection, data-feed flag, audit-log destination, and any other environment-keyed behavior. Same image, different config — no separate codebases.
+
+### 7.6 Bootstrap LLM economics
+
+Compressed-history replay (Phase 1–3) projects 4–6 weeks of wall-clock to walk 2018 → vault boundary at thousands of mutations. At one LLM call per mutation, this exceeds tier-1 cloud-provider RPM quotas under any reasonable iteration budget.
+
+**Plan:** primary bootstrap LLM is **local Gemma 4 via Ollama** on the host's Metal GPU. This is free and rate-limited only by hardware throughput (~30–60 mutations/hour empirically expected on M-series silicon for the model size at hand; verify in Phase 0). Cloud LLMs (Anthropic, Gemini, OpenRouter) are reserved for:
+- Hard mutations Hunter can't make headway on locally (escalation triggered by Archivist when KB indicates "we've been stuck on this regime for N attempts")
+- Weekend Archivist Level-2/Level-3 synthesis (long-context reasoning, Gemini)
+- Web research (long-document fundamental analysis, Gemini)
+
+**Implication:** Phase 0 must verify Gemma-4-via-Ollama throughput meets the bootstrap schedule before Phase 1 begins. If it doesn't, options are: extend bootstrap wall-clock; budget cloud-tier upgrade (real cost — link to Plan §27); or reduce `experiments_per_day` in compressed-replay. The integration spec §6.5 cadence is adjustable.
+
 ## 8. Spec Catalog
 
 Specs live at `docs/superpowers/specs/`. Naming convention: `YYYY-MM-DD-<topic>-spec.md`.
@@ -241,14 +280,16 @@ Specs live at `docs/superpowers/specs/`. Naming convention: `YYYY-MM-DD-<topic>-
 
 | Spec (planned) | Drafted before | Purpose |
 |---|---|---|
-| `data-foundation-spec.md` | Phase 1 | Data ingestion, feature engineering, vault embargo |
+| `data-foundation-spec.md` | Phase 1 | Data ingestion (free APIs first: yfinance, Alpaca free tier, FRED, Stooq, Tiingo free tier), feature engineering, vault embargo |
 | `regime-detector-spec.md` | Phase 1 | MACRO/MESO/MICRO lens algorithms |
+| `synthetic-data-spec.md` | Phase 2 | GBM with regime switching, jump-diffusion, historical analogue generation; library boundary |
 | `five-wall-fortress-spec.md` | Phase 2 | Anti-overfitting predicates and 3-gate system |
-| `intelligence-layer-spec.md` | Phase 4 | News classifier, transition predictor, web research |
-| `paper-trading-spec.md` | Phase 5 | Alpaca integration, position sizing, hard limits |
-| `governance-spec.md` | Phase 6 | Kill switch, Telegram bot, dashboard, audit |
-| `live-trading-stage-1-spec.md` | Phase 7 | Capital allocation, monitoring, escalation |
-| `cloud-deployment-spec.md` | When ready to leave local | Hostinger / CloudFront / equivalent |
+| `intelligence-layer-spec.md` | Phase 4 | News classifier, transition predictor, web-research service & sandbox profile |
+| `paper-trading-spec.md` | Phase 5 | Alpaca integration, position sizing, hard limits, regulatory compliance (PDT, wash-sale, SSR) |
+| `governance-spec.md` | Phase 6 | Kill switch UX, Telegram bot, Streamlit dashboard, audit-log discipline |
+| `performance-attribution-spec.md` | Phase 6 | Regime/strategy/sector/holding-period/signal-source attribution (Plan §25) |
+| `live-trading-stage-1-spec.md` | Phase 7 | Capital allocation per Plan §27 ($5K–$15K → $15K–$50K → $50K–$200K), monitoring, escalation |
+| `cloud-deployment-spec.md` | Before Phase 7 cutover | Hostinger / CloudFront / equivalent; PROD environment activation |
 
 Plans (executable task lists) follow specs and live at `docs/superpowers/plans/`.
 
@@ -256,9 +297,11 @@ Plans (executable task lists) follow specs and live at `docs/superpowers/plans/`
 
 These are flagged from the source project plan; they do not block Phase 0–3 work but need resolution before later phases:
 
-1. **NemoClaw plugin/extension API maturity.** NemoClaw is alpha software (released March 2026). Its extension surface may shift. Mitigation: stay in Tier 1 (configuration) extensions; pin to known-good releases; review release notes before each pull.
+1. **NemoClaw plugin/extension API maturity & abandonment risk.** NemoClaw is alpha software (released March 2026). Its extension surface may shift between minor versions; NVIDIA could pause or deprecate the project. Mitigation has two layers:
+   - **Routine instability:** stay in Tier 1 (configuration) extensions; pin to known-good releases; review release notes before each pull; integration test gate before merging any subtree pull.
+   - **Abandonment contingency:** keep our use of NemoClaw confined to a minimum substrate API surface — channel pub/sub, sandbox enforcement, agent lifecycle — that any reasonable agent-orchestration substrate could provide. *Do not* depend on NemoClaw-specific features such as its native routed-inference layer (LiteLLM in front of it already protects this). Acceptable replacements if NemoClaw is abandoned: LangGraph, raw Docker + nats.io for channels, or a custom orchestrator. Verify quarterly that our agents would port to a replacement substrate within reasonable effort (target: <2 person-weeks).
 2. **Pre-2020 news archive coverage.** Alpaca's news archive starts ~2020. For 2018–2019 backtests, choices are price-action proxies, alternate news source (cost), or truncating training history. Decision deferred to Phase 1 spec.
-3. **Capital scaling thresholds.** When does Stage 1 ($5K–$15K) promote to Stage 2 ($50K+)? Performance and stability targets undefined. Decision deferred to Phase 7 spec.
+3. **Capital scaling thresholds.** Plan §27 proposes $5K–$15K (Stage 1) → $15K–$50K (Stage 2) → $50K–$200K (Stage 3) with Sharpe > 1.0 plus 6–12-month track record as Stage 1→2 trigger. Confirm or revise during Phase 7 (`live-trading-stage-1-spec.md`).
 4. **Regime label taxonomy.** MACRO regimes are conceptually clear but boundary edge cases are not (e.g., "early bull with narrowing breadth" — bull or rotation?). Calibration deferred to Phase 1 regime-detector spec.
 5. **Earnings-season special handling.** Project plan acknowledges earnings drive volatility but no dedicated module is specified. Decision deferred to Phase 4 spec.
 6. **LLM provider fallback priority.** If primary provider fails or hits rate limits, what is the fallback order? Cost-vs-capability tradeoff. Decision deferred to integration spec implementation; LiteLLM supports fallback chains natively.

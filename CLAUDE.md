@@ -12,7 +12,7 @@ Source-of-truth project plan: [`docs/project_plan/MAHORAGA_PROJECT_PLAN.md`](doc
 
 ## Architecture in one paragraph
 
-NemoClaw (vendored at `vendor/nemoclaw/`) is the substrate — agent OS providing lifecycle, hardened sandbox, state, managed channels, and routed inference. Three always-on agents (Hunter, Guardian, Archivist) plus stateless workers (regime-detector, data-ingest, execution, training) run as sibling containers under NemoClaw. LiteLLM gateway sidecar provides multi-provider LLM routing (Ollama local, OpenRouter, Gemini, Anthropic, OpenAI, Grok behind one OpenAI-compatible API). Postgres + pgvector is the single application database (knowledge base, trade journal, experiment metadata, strategy registry pointers). Strategy mutations are driven by a karpathy/autoresearch-style loop, vendored once at `vendor/autoresearch/` and adapted in `training/`. Everything dockerized; `docker compose up` brings the full local stack online on Apple Silicon.
+NemoClaw (vendored at `vendor/nemoclaw/`) is the substrate — agent OS providing lifecycle, hardened sandbox, state, managed channels, and routed inference. Always-on agents (Hunter, Guardian, Archivist, plus Phase-4+ web-research) run as sibling containers under NemoClaw, alongside stateless workers (regime-detector, data-ingest, execution, training, news-classifier, synthetic-data library). LiteLLM gateway sidecar provides multi-provider LLM routing (Ollama-local Gemma 4, OpenRouter, Gemini, Anthropic, OpenAI, Grok behind one OpenAI-compatible API). Postgres + pgvector is the single application database (knowledge base, trade journal, experiment metadata, strategy registry pointers). Strategy mutations are driven by a karpathy/autoresearch-style loop, vendored once at `vendor/autoresearch/` and adapted in `training/`. Everything dockerized; `docker compose up` brings the full local stack online on Apple Silicon.
 
 ## Key architectural decisions (locked in 2026-04-25)
 
@@ -111,12 +111,12 @@ These come from the project plan and must be enforced at the execution boundary,
 
 ## Open questions to resolve as we go
 
-These are flagged in the architecture spec; they don't block Phase 0–3 work but need resolution before later phases:
+Selected items only; the full lists live in the spec files (architecture spec §9 covers cross-cutting questions; integration spec §10 covers integration-scoped questions). The non-trivial items that shape near-term work:
 
-1. NemoClaw plugin/extension API maturity (alpha software, may shift)
-2. Pre-2020 news archive coverage strategy
-3. Capital scaling thresholds (Stage 1 → Stage 2)
-4. Regime label taxonomy (boundaries between MACRO regimes)
-5. Earnings-season special handling
+1. NemoClaw alpha-software risk — both extension-API maturity and project-abandonment contingency (architecture spec §9, item 1)
+2. Bootstrap LLM throughput on actual hardware — Phase 0 must verify Gemma-4-via-Ollama meets compressed-replay schedule (integration spec §10, item 5)
+3. Pre-2020 news archive coverage strategy
+4. Capital scaling thresholds — Plan §27 proposes specific stages; confirm in Phase 7 (architecture spec §9, item 3)
+5. Regime label taxonomy and earnings-season special handling
 6. LLM provider fallback priority order under cost or rate-limit pressure
 

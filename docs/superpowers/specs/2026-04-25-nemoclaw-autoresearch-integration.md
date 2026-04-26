@@ -159,7 +159,7 @@ Supported provider namespaces (initial):
 - `openai/*` — `OPENAI_API_KEY`
 - `xai/*` — `XAI_API_KEY` (Grok)
 
-Per-call model identifiers are namespaced (`anthropic/claude-opus-4-7`, `ollama/gemma3:27b`, etc.). Switching providers is a config edit, not a code change.
+Per-call model identifiers are namespaced (`anthropic/claude-opus-4-7`, `ollama/gemma4:latest`, etc.). Switching providers is a config edit, not a code change.
 
 LiteLLM features used initially:
 
@@ -186,9 +186,9 @@ NemoClaw's internal state is NOT in this Postgres. NemoClaw uses whatever it shi
 
 Runs on the **host**, not in a container. This preserves Apple Silicon Metal acceleration, which is lost when Ollama is containerized on macOS. Containers reach Ollama via `http://host.docker.internal:11434` (Docker Desktop) or the equivalent Colima host name.
 
-Models pulled at Phase 0: `gemma3:27b` (or current Gemma 3 variant) for local inference. Additional local models added as needed.
+Models pulled at Phase 0: Gemma 4 (per project plan) via `ollama pull gemma4`; if Gemma 4 is not yet available in Ollama, use latest Gemma release as interim. Additional local models added as needed.
 
-### 4.5 Agent containers (Hunter / Guardian / Archivist)
+### 4.5 Agent containers (Hunter / Guardian / Archivist / Web-Research)
 
 Each agent is its own Python service under `services/<role>/`. Standard structure:
 
@@ -207,14 +207,18 @@ services/hunter/
 
 Agents register with NemoClaw at startup, subscribe to their declared channels, and run a long-lived event loop. They use the LiteLLM gateway for any LLM call.
 
+The fourth agent, `web-research` (Phase 4+), follows the same structural pattern but uses a *distinct sandbox profile* (`web-research-agent`) with outbound web egress to a fixed allowlist (FRED, SEC EDGAR, Federal Reserve RSS, CME FedWatch, news syndication endpoints). It runs on a Sunday cron, synthesizes macro narratives from public sources, and publishes Level-2 / Level-3 KB entries to the `kb-updates` channel. The Hunter / Guardian / Archivist sandboxes have *no* general web egress; this isolation is intentional and is enforced in §5.4.
+
 ### 4.6 Stateless workers
 
 Same structural pattern as agents but invoked on demand rather than long-lived:
 
 - `services/regime-detector/` — exposes RPC `compute_regime(date) → MacroMesoMicro`
-- `services/data-ingest/` — runs as a daemon; ingests from Alpaca/Polygon/news websockets
-- `services/execution/` — exposes RPC `submit_order(order) → result`; enforces hard limits
-- `services/training/` — exposes RPC `run_iteration(strategy, budget) → FitnessReport`; called by Hunter
+- `services/data-ingest/` — runs as a daemon; ingests from free APIs first (yfinance, Alpaca free tier, FRED, Stooq, Tiingo free tier), with paid APIs (Polygon, Alpaca paid) only if free tier is insufficient. 1-minute granularity is sufficient; per-tick is not required.
+- `services/execution/` — exposes RPC `submit_order(order) → result`; enforces hard limits and regulatory compliance predicates
+- `services/training/` — exposes RPC `run_iteration(strategy, budget) → FitnessReport`; called by Hunter; calls `synthetic-data` library for Wall 4 perturbations
+- `services/news-classifier/` — Phase 4; <2s classification SLA (CRITICAL / MATERIAL / BACKGROUND); detail in `intelligence-layer-spec.md`
+- `services/synthetic-data/` (library, not container) — Phase 2; GBM with regime switching, jump-diffusion, historical analogue generation; consumed by Guardian and `training`. Detail in `synthetic-data-spec.md`.
 
 ## 5. NemoClaw Configuration
 
@@ -224,38 +228,54 @@ Lives at `infra/nemoclaw-config/`. Mounted read-only into the NemoClaw container
 
 ```yaml
 # Registers each agent with NemoClaw. Adding agents = appending entries.
+# Each agent gets a per-role sandbox profile (defined in sandbox-policies.yaml)
+# rather than a shared "research-agent" profile, since their attack surfaces
+# and required capabilities differ.
 agents:
   - name: hunter
     image: mahoraga/hunter:latest
-    sandbox: research-agent
+    sandbox: hunter-sandbox            # write access to strategy registry; calls training
     channels:
-      subscribe: [market-state, kb-updates, risk-vetoes, execution-results]
+      subscribe: [market-state, kb-updates, risk-vetoes, execution-results, halt]
       publish: [strategy-proposals, execution-orders]
     inference:
       route: default
-      preferred_model: anthropic/claude-opus-4-7
-      fallback: [openrouter/x-ai/grok-2, ollama/gemma3:27b]
+      preferred_model: ollama/gemma4:latest    # primary local for bootstrap-economy reasons
+      fallback: [anthropic/claude-opus-4-7, openrouter/x-ai/grok-2]
 
   - name: guardian
     image: mahoraga/guardian:latest
-    sandbox: research-agent
+    sandbox: guardian-sandbox          # read-only registry; calls synthetic-data + training
     channels:
-      subscribe: [strategy-proposals, market-state, execution-results]
-      publish: [risk-vetoes]
+      subscribe: [strategy-proposals, market-state, execution-results, halt]
+      publish: [risk-vetoes, halt]     # Guardian can trigger halt on catastrophic loss
     inference:
       route: default
-      preferred_model: anthropic/claude-opus-4-7
-      fallback: [openai/gpt-4o]
+      preferred_model: ollama/gemma4:latest
+      fallback: [anthropic/claude-opus-4-7, openai/gpt-4o]
 
   - name: archivist
     image: mahoraga/archivist:latest
-    sandbox: research-agent
+    sandbox: archivist-sandbox         # broad read access to KB; no web egress
     channels:
-      subscribe: [execution-results, strategy-proposals, risk-vetoes]
+      subscribe: [execution-results, strategy-proposals, risk-vetoes, halt]
       publish: [kb-updates]
     inference:
       route: default
       preferred_model: gemini/gemini-2.0-pro       # long-context for KB synthesis
+      fallback: [anthropic/claude-opus-4-7]
+
+  # Phase 4+: web-research has a distinct sandbox with outbound web egress.
+  - name: web-research
+    image: mahoraga/web-research:latest
+    sandbox: web-research-agent        # outbound web egress to fixed allowlist
+    schedule: "0 19 * * 0"             # Sunday 7pm cron
+    channels:
+      subscribe: [halt]
+      publish: [kb-updates]
+    inference:
+      route: default
+      preferred_model: gemini/gemini-2.0-pro       # long-context for fundamental synthesis
       fallback: [anthropic/claude-opus-4-7]
 ```
 
@@ -281,7 +301,12 @@ channels:
   - name: execution-results
     payload_schema: schemas/execution_result.json
     retention: indefinite          # audit-critical
+  - name: halt
+    payload_schema: schemas/halt_event.json
+    retention: indefinite          # audit-critical; kill-switch trail
 ```
+
+The `halt` channel is the kill-switch primary path (architecture spec §5.6). Any service can publish a halt event; all order-emitting services must subscribe and stop submitting orders within 1 second of receipt. Recovery requires an explicit human-issued `halt_clear` event on the same channel.
 
 ### 5.3 `inference-routes.yaml`
 
@@ -299,23 +324,93 @@ A single `default` route covers everything; per-agent overrides go in `agents.ya
 ### 5.4 `sandbox-policies.yaml`
 
 ```yaml
+# Per-role sandbox profiles. Different agents have different attack surfaces
+# and required capabilities; sharing one "research-agent" profile would over-
+# permission Archivist (no need for execution egress) and under-permission
+# web-research (needs internet egress). Hunter, Guardian, Archivist all have
+# zero general web egress — only web-research-agent does.
 sandboxes:
-  - name: research-agent
+  - name: hunter-sandbox
     network:
       egress_allowlist:
-        - http://litellm:4000           # inference only via gateway
-        - http://postgres:5432          # KB and metadata
+        - http://litellm:4000
+        - http://postgres:5432
         - http://regime-detector:8080
         - http://training:8080
-        - http://execution:8080         # but only Hunter is allowed by channel rules
+        - http://execution:8080         # only Hunter publishes to execution-orders
     filesystem:
       mounts:
         - source: data/audit
           target: /audit
-          read_only: false              # agents append to audit
+          read_only: false
         - source: data/parquet
           target: /data
-          read_only: true               # data is read-only to agents
+          read_only: true
+        - source: strategies
+          target: /strategies
+          read_only: false              # only Hunter writes to strategy registry
+    resources:
+      memory_max: 4G
+      cpu_max: 2
+
+  - name: guardian-sandbox
+    network:
+      egress_allowlist:
+        - http://litellm:4000
+        - http://postgres:5432
+        - http://training:8080          # for adversarial-stress runs
+    filesystem:
+      mounts:
+        - source: data/audit
+          target: /audit
+          read_only: false
+        - source: data/parquet
+          target: /data
+          read_only: true
+        - source: strategies
+          target: /strategies
+          read_only: true               # read-only for Guardian (vetoes, doesn't write)
+    resources:
+      memory_max: 4G
+      cpu_max: 2
+
+  - name: archivist-sandbox
+    network:
+      egress_allowlist:
+        - http://litellm:4000
+        - http://postgres:5432          # broad read access to KB schemas
+    filesystem:
+      mounts:
+        - source: data/audit
+          target: /audit
+          read_only: false
+        - source: data/parquet
+          target: /data
+          read_only: true
+    resources:
+      memory_max: 4G
+      cpu_max: 2
+
+  # Phase 4+: outbound web egress to a fixed allowlist for macro research.
+  - name: web-research-agent
+    network:
+      egress_allowlist:
+        - http://litellm:4000
+        - http://postgres:5432
+        - https://fred.stlouisfed.org
+        - https://www.federalreserve.gov
+        - https://www.sec.gov                  # EDGAR
+        - https://www.cmegroup.com             # FedWatch
+        - https://api.tiingo.com               # news syndication (free tier)
+        - https://newsapi.org                  # news aggregation (if used)
+    filesystem:
+      mounts:
+        - source: data/audit
+          target: /audit
+          read_only: false
+        - source: data/research
+          target: /research
+          read_only: false              # cached web fetches
     resources:
       memory_max: 4G
       cpu_max: 2
@@ -513,7 +608,19 @@ INSERT INTO knowledge.experiments (
 
 The `embedding` is computed from the mutation diff plus regime context, enabling Archivist to retrieve "have we tried this kind of thing before?" via pgvector similarity search at the start of every Hunter prompt construction.
 
-### 6.7 What we copy from `vendor/autoresearch/`, what we discard
+### 6.7 Bootstrap LLM economics
+
+Compressed-history replay (§6.5) projects 4–6 weeks of wall-clock to walk 2018 → vault boundary at thousands of mutations × 1 LLM call/mutation. This exceeds tier-1 cloud-provider RPM quotas under any reasonable iteration budget; the math only pencils with a primary local LLM.
+
+**Plan:**
+- **Bootstrap primary:** `ollama/gemma4:latest` on host Metal GPU. Free; rate-limited only by hardware throughput. Phase 0 acceptance criterion #5 (LiteLLM round-trip against ≥2 providers including Ollama) verifies the path; Phase 0 must additionally measure throughput and confirm it meets the schedule (target: 30–60 mutations/hour empirically; verify on actual hardware).
+- **Cloud LLM reserved for:**
+  - Hard mutations Hunter can't make headway on locally — escalation triggered by Archivist when KB indicates "we've been stuck on this regime for N attempts"
+  - Weekend Archivist Level-2 / Level-3 synthesis (long-context reasoning, Gemini)
+  - Weekly web research (long-document fundamental analysis, Gemini)
+- **If Phase 0 throughput measurement fails** the bootstrap schedule, options are: extend bootstrap wall-clock, budget cloud-tier upgrade (real cost, link to Plan §27), or reduce `experiments_per_day` in compressed-replay (the §6.5 cadence is adjustable).
+
+### 6.8 What we copy from `vendor/autoresearch/`, what we discard
 
 **Copy (and adapt):** `program.md` → `training/program.md` (rewritten for trading-strategy mutation); loop scaffolding patterns from upstream `train.py` → inform our `training/loop.py` structure.
 
@@ -627,7 +734,7 @@ Ollama runs on the host, not in Compose. Container access via `host.docker.inter
 | stateless workers | 512 MB each | bursty; vectorbt on training spikes higher |
 | training (vectorbt heavy) | 4 GB cap, expect 2 GB typical | heaviest worker |
 
-Ollama on host can use all remaining RAM for Gemma 3 inference (~16 GB model weights for `gemma3:27b` in q4 quant).
+Ollama on host can use all remaining RAM for Gemma 4 inference. Memory requirement depends on Gemma 4 release variant; Phase 0 verifies sized model fits within available RAM and meets the bootstrap throughput target (see §6.8).
 
 ## 8. Upstream Tracking Workflow
 
@@ -695,13 +802,15 @@ These gate the Phase 0–3 exits.
 
 ## 10. Open Questions & Known Unknowns
 
-These are flagged but do not block Phases 0–3. They will be resolved in implementation or in subsequent specs.
+These are flagged but do not block Phases 0–3. They will be resolved in implementation or in subsequent specs. (Cross-cutting open questions affecting the whole project are in the architecture spec §9; the list below is integration-spec-scoped.)
 
-1. **NemoClaw plugin/extension API maturity.** Alpha software. Tier 1 config surface may shift between minor versions. Mitigation: pin to known-good tags; review release notes before each pull.
+1. **NemoClaw plugin/extension API maturity & abandonment risk.** Alpha software (released March 2026). Tier 1 config surface may shift between minor versions. NVIDIA could pause or deprecate the project. Mitigation:
+   - **Routine instability:** stay in Tier 1 extensions; pin to known-good tags; review release notes before each pull; integration test gate before merging any subtree pull.
+   - **Abandonment contingency:** confine our use to a minimum substrate API surface (channel pub/sub, sandbox enforcement, agent lifecycle) any orchestration substrate could provide. Do *not* depend on NemoClaw-specific routed-inference layer (LiteLLM in front already protects this). Acceptable replacements if abandoned: LangGraph, raw Docker + nats.io, custom orchestrator. Verify quarterly that agents would port to a replacement substrate within ~2 person-weeks.
 2. **NemoClaw's exact channel-payload schema mechanism.** Whether NemoClaw natively validates JSON Schema on channel payloads or requires a thin wrapper in our agents. Verify Phase 0; adapt §5.2 accordingly.
 3. **LiteLLM provider behavior under load.** Rate limits, fallback timing, cost-cap enforcement under burst. Empirical investigation in Phase 3 once nightly cadence is running.
 4. **pgvector vs. dedicated vector DB at scale.** pgvector is the right call for tens of millions of embeddings. If KB grows past ~50M entries, a dedicated vector DB (Qdrant, Milvus) may become preferable. Decision deferred until KB size approaches that scale.
-5. **Compressed-replay clock-skew handling.** During bootstrap, simulated clock advances faster than wall clock. LLM rate limits and API quotas operate on wall clock. Resolution: rate-limit the loop to LLM provider limits regardless of simulated clock, and accept that bootstrap takes 4–6 wall-clock weeks. Detail in Phase 3 implementation.
-6. **NemoClaw internal-state portability for cloud deployment.** When we move from local to cloud, NemoClaw's internal SQLite-or-equivalent state needs migration. Verify mechanism during Phase 0; revisit in cloud-deployment spec.
-7. **Strategy-registry git remote.** Strategies are git-versioned. Where does the registry repository live? Same monorepo (subdirectory) or separate? Decision deferred to Phase 3 implementation.
-8. **Vendor patch upstream-PR cadence.** When we land Tier 3 patches, how aggressively do we attempt to upstream them? Trade-off between merge debt and maintenance burden. Policy decision deferred until first patch lands.
+5. **Bootstrap LLM throughput on actual hardware.** §6.7 plans Gemma-4-via-Ollama as primary bootstrap LLM at 30–60 mutations/hour empirically expected. Phase 0 must measure this against the actual MacBook Pro and confirm the 4–6-week bootstrap schedule is achievable, OR fall back to cloud tier (cost link to Plan §27) or reduce `experiments_per_day`.
+6. **NemoClaw internal-state portability for cloud deployment.** When we move from local DEV to cloud PROD, NemoClaw's internal state needs migration. Verify mechanism during Phase 0; revisit in `cloud-deployment-spec.md`.
+7. **Vendor patch upstream-PR cadence.** When we land Tier 3 patches, how aggressively do we attempt to upstream them? Trade-off between merge debt and maintenance burden. Policy decision deferred until first patch lands.
+8. **Capital-stage thresholds (Plan §27).** $5K–$15K → $15K–$50K → $50K–$200K with Sharpe > 1.0 and 6–12-month track record as Stage 1→2 trigger is the plan's proposal. Confirm or revise during `live-trading-stage-1-spec.md`.
