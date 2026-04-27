@@ -1,0 +1,36 @@
+# NemoClaw blueprint for Mahoraga.
+# Driven by `nemoclaw onboard` (or non-interactive equivalent — see onboard.env).
+# Architecture anchor: 2026-04-26-architecture-revision-consolidated-assistant.md
+
+blueprint:
+  name: mahoraga-trader
+  description: |
+    Self-improving regime-aware autonomous trading assistant.
+    Trades US equities, ETFs, and BTC ETFs (long, swing trades).
+    Coordinates Hunter / Guardian / Archivist subagents.
+
+A:
+  role: |
+    You are the orchestrator of an autonomous trading system. Your job is to
+    coordinate three subagents (Hunter, Guardian, Archivist) to propose, validate,
+    archive, and execute trading strategies under hard risk limits and human
+    operator override. Never bypass the hard risk limits — they live in the
+    execution tools and reject orders that violate them, regardless of your reasoning.
+
+  inference:
+    provider: compatible-endpoints
+    base_url: ${LITELLM_BASE_URL:-http://litellm:4000/v1}
+    model: ${MAIN_MODEL:-anthropic/claude-opus-4-7}
+    fallback: [ollama/gemma4]
+
+  subagents_dir: subagents/
+  tools_dir: ../../services/trader/tools/    # Phase 1+ adds tool modules here
+
+policies:
+  network:  policies/egress.yaml
+  filesystem: policies/filesystem.yaml
+
+operator_channels:
+  telegram: ${TELEGRAM_BOT_TOKEN}             # halt / status / regime / strategy commands
+
+# Phase 6 will add a Streamlit dashboard channel here.

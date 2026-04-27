@@ -1,0 +1,25 @@
+# Network egress policy — explicit allowlist. Unknown hosts are blocked and
+# surfaced to the operator via NemoClaw's policy approval TUI (the operator
+# decides per-request; approvals do NOT persist to this baseline file).
+egress:
+  allowlist:
+    # LLM gateway (host or sidecar)
+    - http://litellm:4000
+    # Application database
+    - http://postgres:5432
+    # Phase 1 — market data (free APIs first)
+    - https://query1.finance.yahoo.com         # yfinance
+    - https://api.alpaca.markets                # Alpaca free tier
+    - https://data.alpaca.markets
+    - https://api.stlouisfed.org                # FRED macro
+    - https://stooq.com                         # Stooq EOD
+    - https://api.tiingo.com                    # Tiingo free tier
+    # Phase 4 — news + research (web-research subagent)
+    - https://www.federalreserve.gov
+    - https://www.sec.gov                       # EDGAR
+    - https://www.cmegroup.com                  # FedWatch
+    # Phase 5 — broker (paper, then live)
+    # - https://paper-api.alpaca.markets        # uncomment in Phase 5
+    # - https://api.alpaca.markets              # live broker (uncomment Phase 7)
+    # Phase 6 — operator notifications
+    # - https://api.telegram.org                # uncomment when Telegram bot configured
