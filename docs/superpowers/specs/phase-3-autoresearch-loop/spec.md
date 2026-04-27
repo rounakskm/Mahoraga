@@ -3,7 +3,7 @@
 **Status:** Approved 2026-04-26
 **Type:** Phase-level spec
 **Phase duration:** 13 weeks (largest phase — this is where the system learns to learn)
-**Anchor specs:** [`2026-04-25-mahoraga-architecture-decomposition.md`](2026-04-25-mahoraga-architecture-decomposition.md), [`2026-04-25-nemoclaw-autoresearch-integration.md`](2026-04-25-nemoclaw-autoresearch-integration.md)
+**Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md), [`../2026-04-25-nemoclaw-autoresearch-integration.md`](../2026-04-25-nemoclaw-autoresearch-integration.md)
 **Predecessor:** Phases 1 + 2
 
 ---

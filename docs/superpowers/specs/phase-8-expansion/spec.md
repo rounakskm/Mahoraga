@@ -3,7 +3,7 @@
 **Status:** Approved 2026-04-26 (framework only; specific tracks each get their own spec when started)
 **Type:** Phase-level spec
 **Phase duration:** ongoing — each expansion track is its own scoped effort
-**Anchor specs:** [`2026-04-25-mahoraga-architecture-decomposition.md`](2026-04-25-mahoraga-architecture-decomposition.md)
+**Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
 **Predecessor:** Phase 7 stable (90+ days live without infrastructure incident)
 
 ---

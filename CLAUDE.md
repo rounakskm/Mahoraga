@@ -4,7 +4,7 @@
 
 ## What is Mahoraga?
 
-A self-improving, regime-aware, autonomous trading system for US equities. The system continuously adapts to market conditions and compounds intelligence over time, not just capital. Concretely: it recognizes market regimes (MACRO / MESO / MICRO lenses), selects strategies from a versioned registry that grows richer each cycle, retires decaying edges proactively, and routes everything through hard infrastructure-level risk limits with human override.
+A self-improving, regime-aware, autonomous trading system for US equities, ETFs and Bitcoin. The system continuously adapts to market conditions and compounds intelligence over time, not just capital. Concretely: it recognizes market regimes (MACRO / MESO / MICRO lenses), selects strategies from a versioned registry that grows richer each cycle, retires decaying edges proactively, and routes everything through hard infrastructure-level risk limits with human override.
 
 The novel contribution is the training loop: 7+ years of historical market data are replayed at accelerated speed in an environment architecturally identical to the live one, so the system has "experienced" many regimes before any real capital is deployed.
 
@@ -108,6 +108,31 @@ These come from the project plan and must be enforced at the execution boundary,
 | How are NemoClaw and autoresearch wired in? | `docs/superpowers/specs/2026-04-25-nemoclaw-autoresearch-integration.md` |
 | What phase are we in? | The most recent commit on `main` plus the spec catalog in the architecture spec |
 | What's allowed to change in `vendor/`? | The "How to extend NemoClaw" section above |
+
+## Practices to follow
+
+How we work in this repo. Not optional — these keep the project on rails.
+
+1. **Use superpowers skills for planning.** New features and non-trivial changes start with the `superpowers:brainstorming` skill (refines intent → design). Structured implementation plans use `superpowers:writing-plans`. Don't jump from a one-line idea to code.
+
+2. **Spec-driven development.** The chain is fixed:
+
+   ```
+   project plan  →  spec  →  plan.md  →  tasks.md  →  implementation
+   ```
+
+   - Each large feature gets its own **spec** under `docs/superpowers/specs/`.
+   - Each spec gets its own **`plan.md`** (implementation plan).
+   - Each plan gets a **`tasks.md`** that **must include an explicit task dependency graph** so subagents can pick up independent tasks in parallel.
+   - Implementation uses the `superpowers:subagent-driven-development` skill.
+
+3. **Code review + system tests.** Use `superpowers:requesting-code-review` to dispatch the reviewer agent at every major step. Unit tests must pass; in addition, run **end-to-end system tests with the Playwright CLI** for any user-facing feature or workflow. "Unit tests pass" without system tests is not done. After we add every large feature, when user asks to test "Prove it to the user that it works"
+
+4. **GitHub hygiene — staff-engineer standard.** Branch per feature; conventional-commit messages; PR descriptions reference the spec / plan being implemented; never push to `main` without review; never bypass hooks (`--no-verify`); prefer small focused commits over large mixed ones. Behave like a staff software engineer in code, comments, and review responses.
+
+5. **Self-update CLAUDE.md when we learn something overarching.** New project-wide convention discovered? Update CLAUDE.md immediately. Per-feature or per-bug learnings stay in the relevant spec / plan, not here. CLAUDE.md is for what every future session needs to know.
+
+6. **Build skills and scripts when a pattern repeats.** If we find ourselves doing the same multi-step thing more than twice (a setup, a test, a deploy step), extract it into a Claude Code skill or a repeatable test script. Goal: steadily reduce manual repetition as the project matures.
 
 ## Open questions to resolve as we go
 

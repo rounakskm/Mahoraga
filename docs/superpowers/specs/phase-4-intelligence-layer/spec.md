@@ -3,7 +3,7 @@
 **Status:** Approved 2026-04-26
 **Type:** Phase-level spec
 **Phase duration:** 9 weeks
-**Anchor specs:** [`2026-04-25-mahoraga-architecture-decomposition.md`](2026-04-25-mahoraga-architecture-decomposition.md)
+**Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
 **Predecessor:** Phase 3
 
 ---

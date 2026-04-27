@@ -273,27 +273,39 @@ Compressed-history replay (Phase 1–3) projects 4–6 weeks of wall-clock to wa
 
 Specs live at `docs/superpowers/specs/`. Naming convention: `YYYY-MM-DD-<topic>-spec.md`.
 
+Per-phase specs each live in their own folder under `docs/superpowers/specs/phase-N-<topic>/`. The folder holds `spec.md` (the broad phase spec), `plan.md` and `tasks.md` (implementation plan + dep graph) when the phase is being implemented, and any sub-feature specs created during that phase under SDD.
+
 ### Currently written
 
 | Spec | Purpose | Phases unblocked |
 |---|---|---|
-| `2026-04-25-mahoraga-architecture-decomposition.md` (this document) | Map of the whole project | Anchors all future specs |
-| `2026-04-25-nemoclaw-autoresearch-integration.md` | NemoClaw substrate + autoresearch loop integration | 0, 1, 2, 3 |
+| [`2026-04-25-mahoraga-architecture-decomposition.md`](2026-04-25-mahoraga-architecture-decomposition.md) (this document) | Map of the whole project | Anchors all future specs |
+| [`2026-04-25-nemoclaw-autoresearch-integration.md`](2026-04-25-nemoclaw-autoresearch-integration.md) | NemoClaw substrate + autoresearch loop integration | 0, 1, 2, 3 |
+| [`phase-0-substrate-bringup/spec.md`](phase-0-substrate-bringup/spec.md) | Phase 0 (walking skeleton) | 0 |
+| [`phase-1-foundation/spec.md`](phase-1-foundation/spec.md) | Phase 1 (data + features + regime) | 1 |
+| [`phase-2-five-wall-fortress/spec.md`](phase-2-five-wall-fortress/spec.md) | Phase 2 (walls + gates + synthetic-data) | 2 |
+| [`phase-3-autoresearch-loop/spec.md`](phase-3-autoresearch-loop/spec.md) | Phase 3 (Hunter/Guardian/Archivist + loop kernel) | 3 |
+| [`phase-4-intelligence-layer/spec.md`](phase-4-intelligence-layer/spec.md) | Phase 4 (news + sentiment + transition predictor) | 4 |
+| [`phase-5-broker-paper-trading/spec.md`](phase-5-broker-paper-trading/spec.md) | Phase 5 (Alpaca paper + compliance) | 5 |
+| [`phase-6-governance-live-prep/spec.md`](phase-6-governance-live-prep/spec.md) | Phase 6 (kill switch + dashboard + convergence report) | 6 |
+| [`phase-7-live-trading-stage-1/spec.md`](phase-7-live-trading-stage-1/spec.md) | Phase 7 (live capital Stage 1) | 7 |
+| [`phase-8-expansion/spec.md`](phase-8-expansion/spec.md) | Phase 8 (expansion framework) | 8 |
 
-### Expected to be written before each phase begins
+### Anticipated sub-feature specs (each lives inside its phase folder)
 
-| Spec (planned) | Drafted before | Purpose |
+| Sub-feature spec | Phase folder | Purpose |
 |---|---|---|
-| `data-foundation-spec.md` | Phase 1 | Data ingestion (free APIs first: yfinance, Alpaca free tier, FRED, Stooq, Tiingo free tier), feature engineering, vault embargo |
-| `regime-detector-spec.md` | Phase 1 | MACRO/MESO/MICRO lens algorithms |
-| `synthetic-data-spec.md` | Phase 2 | GBM with regime switching, jump-diffusion, historical analogue generation; library boundary |
-| `five-wall-fortress-spec.md` | Phase 2 | Anti-overfitting predicates and 3-gate system |
-| `intelligence-layer-spec.md` | Phase 4 | News classifier, transition predictor, web-research service & sandbox profile |
-| `paper-trading-spec.md` | Phase 5 | Alpaca integration, position sizing, hard limits, regulatory compliance (PDT, wash-sale, SSR) |
-| `governance-spec.md` | Phase 6 | Kill switch UX, Telegram bot, Streamlit dashboard, audit-log discipline |
-| `performance-attribution-spec.md` | Phase 6 | Regime/strategy/sector/holding-period/signal-source attribution (Plan §25) |
-| `live-trading-stage-1-spec.md` | Phase 7 | Capital allocation per Plan §27 ($5K–$15K → $15K–$50K → $50K–$200K), monitoring, escalation |
-| `cloud-deployment-spec.md` | Before Phase 7 cutover | Hostinger / CloudFront / equivalent; PROD environment activation |
+| `data-foundation-spec.md` | `phase-1-foundation/` | Data ingestion (free APIs first), feature engineering details, vault embargo |
+| `regime-detector-spec.md` | `phase-1-foundation/` | MACRO/MESO/MICRO lens algorithms |
+| `synthetic-data-spec.md` | `phase-2-five-wall-fortress/` | GBM+regime switching, jump-diffusion (BTC-aware), historical analogue generation |
+| `five-wall-fortress-spec.md` | `phase-2-five-wall-fortress/` | Anti-overfitting predicates and 3-gate system |
+| `intelligence-layer-spec.md` | `phase-4-intelligence-layer/` | News classifier, transition predictor, web-research service |
+| `paper-trading-spec.md` | `phase-5-broker-paper-trading/` | Alpaca integration, position sizing, hard limits, regulatory compliance |
+| `governance-spec.md` | `phase-6-governance-live-prep/` | Kill switch UX, Telegram bot, Streamlit dashboard, audit discipline |
+| `performance-attribution-spec.md` | `phase-6-governance-live-prep/` | Regime/strategy/sector/holding-period/signal-source attribution (Plan §25) |
+| `convergence-report-spec.md` | `phase-6-governance-live-prep/` | Vault holdout validation; threshold for live-capital readiness |
+| `cloud-deployment-spec.md` | `phase-7-live-trading-stage-1/` | Hostinger / CloudFront / equivalent; PROD environment activation |
+| `live-trading-stage-1-spec.md` | `phase-7-live-trading-stage-1/` | Capital allocation per Plan §27, monitoring, escalation |
 
 Plans (executable task lists) follow specs and live at `docs/superpowers/plans/`.
 

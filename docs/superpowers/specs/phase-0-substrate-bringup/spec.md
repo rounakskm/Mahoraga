@@ -3,7 +3,7 @@
 **Status:** Approved 2026-04-26
 **Type:** Phase-level spec (broad; per-feature SDD specs to follow during implementation)
 **Phase duration:** 2 weeks
-**Anchor specs:** [`2026-04-25-mahoraga-architecture-decomposition.md`](2026-04-25-mahoraga-architecture-decomposition.md), [`2026-04-25-nemoclaw-autoresearch-integration.md`](2026-04-25-nemoclaw-autoresearch-integration.md)
+**Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md), [`../2026-04-25-nemoclaw-autoresearch-integration.md`](../2026-04-25-nemoclaw-autoresearch-integration.md)
 **Predecessor:** none — this is the first phase
 
 ---
