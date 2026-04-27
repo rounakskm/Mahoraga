@@ -8,7 +8,7 @@ spec §3 ("Three-tier extension model") — Tier 3 patches are last-resort.
 
 - Upstream: `https://github.com/NVIDIA/NemoClaw`
 - Tag/SHA: `v0.0.27` (`6f7f0c6dd90c4c823923934d11a619beadc85f6b`)
-- Date pulled: `2026-04-25`
+- Date pulled: `2026-04-26`
 
 ## Modifications
 
