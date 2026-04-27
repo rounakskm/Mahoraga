@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Walking-skeleton substrate where every architectural element from the integration spec is brought online and exercised end-to-end before any phase that depends on it. By the end, `docker compose up` brings the full local stack online, a heartbeat agent registers with NemoClaw and round-trips messages, the halt-channel contract is testable, CI is green, and Gemma-4-via-Ollama throughput is measured.
+> **⚠️ REVISED 2026-04-26 — Consolidated Assistant Model.** After vendoring NemoClaw at v0.0.27 in T3, we discovered the substrate runs **one OpenClaw assistant per sandbox**, not multi-agent pub/sub. Hunter / Guardian / Archivist become **OpenClaw subagents** sharing tools and KB but with their own context windows. See [`../2026-04-26-architecture-revision-consolidated-assistant.md`](../2026-04-26-architecture-revision-consolidated-assistant.md). Tasks T1, T1.5, T2, T3 are already complete and unchanged. Tasks T4, T6, T9, T10 are rewritten below; T7, T8, T11 have light edits. T5, T12, T13, T14 stand as written.
+
+**Goal:** Walking-skeleton substrate where every architectural element from the architecture revision is brought online and exercised end-to-end before any phase that depends on it. By the end, the host runs an OpenClaw-in-NemoClaw sandbox that responds to a basic prompt via Telegram, halt-via-`/halt` is testable in <1s, Postgres + LiteLLM sidecars are healthy, CI is green, and Gemma-4-via-Ollama throughput is measured.
 
 **Architecture:** Single-monorepo Docker Compose stack on Apple Silicon. NemoClaw at `vendor/nemoclaw/` as `git subtree`. autoresearch frozen at `vendor/autoresearch/`. LiteLLM gateway sidecar fronts Ollama (host-side, Metal) + Anthropic. Postgres+pgvector single application database. One Python service (`heartbeat`) demonstrates the agent boilerplate Phase 3 will reuse.
 
@@ -477,63 +479,88 @@ git commit -m "docs(vendor): record NemoClaw vendoring at <tag>"
 
 ---
 
-## Task 4: NemoClaw runtime API discovery
+## Task 4: OpenClaw subagent topology design (REVISED)
 
 **Files:**
-- Create: `docs/research/nemoclaw-api-surface.md`
+- Create: `docs/research/openclaw-subagent-model.md`
 
-- [ ] **Step 1: Read NemoClaw's source** for agent registration and channel pub/sub APIs
+The original T4 was "discover NemoClaw API surface". Discovery is done — see the architecture revision. T4 now produces the design that T6 (config) and T9 (smoke) implement against.
 
-Investigate (in order until you have answers):
-- `vendor/nemoclaw/README.md` and any `docs/` subdirectory
-- `vendor/nemoclaw/src/` for the agent runtime entry points
-- `vendor/nemoclaw/package.json` for exposed npm scripts and bin commands
-- Look for terms: `register`, `agent`, `channel`, `subscribe`, `publish`, `route`, `sandbox`
+- [ ] **Step 1: Read OpenClaw subagent + tool documentation**
 
-- [ ] **Step 2: Document findings** at `docs/research/nemoclaw-api-surface.md`
+OpenClaw is the assistant runtime; NemoClaw orchestrates it. Subagent + tool primitives live in OpenClaw, not NemoClaw. Investigate (in order):
 
-Template:
+- `vendor/nemoclaw/.agents/skills/nemoclaw-user-overview/references/how-it-works.md` — describes the plugin + blueprint split
+- `vendor/nemoclaw/.agents/skills/nemoclaw-user-reference/` — architecture reference
+- `vendor/nemoclaw/nemoclaw-blueprint/` — blueprint YAML; how subagents get registered with OpenClaw
+- OpenClaw's own docs at `https://openclaw.ai` (web fetch) — the subagent + tool API
+- Any `subagents/` or `tools/` examples in `vendor/nemoclaw/`
+
+If web access is blocked or `openclaw.ai` is unavailable, document what you can infer from the vendored sources and flag remaining unknowns.
+
+- [ ] **Step 2: Design the three subagents**
+
+Write `docs/research/openclaw-subagent-model.md` with these sections:
 
 ```markdown
-# NemoClaw Runtime API Surface — Discovery Notes
+# Mahoraga Subagent Topology
 
-**Vendored version:** see `vendor/nemoclaw/MAHORAGA_CHANGES.md`
+**Architecture anchor:** `docs/superpowers/specs/2026-04-26-architecture-revision-consolidated-assistant.md`
 **Date:** 2026-04-26
 
-## How agents are configured
+## The main orchestrator
 
-[Describe the configuration mechanism — YAML files, env vars, runtime registration calls. Reference exact files in vendor/nemoclaw/.]
+[The always-on OpenClaw assistant that runs Mahoraga's day. Its responsibilities, when it dispatches each subagent, what it preserves between dispatches.]
 
-## How agents register at startup
+## Hunter subagent
 
-[Describe the registration handshake: HTTP endpoint, gRPC, message bus, etc. Include exact request/response shape.]
+- **Role:** propose strategy mutations for the autoresearch loop
+- **Dispatch trigger:** [nightly cron 5pm-8:30am ET; weekend full pass; compressed-replay]
+- **Context inherited:** [current strategy file; KB context pack from Archivist; current regime]
+- **Tools allowed:** [vectorbt backtester, KB-read, regime-detector-read, autoresearch loop runner]
+- **Tools forbidden:** [execution, KB-write at Level-2/3, strategy-registry-write — those go through main]
+- **System prompt sketch:** [a draft prompt that captures Hunter's role; reference Plan §6.4 of integration spec]
 
-## Channel pub/sub mechanism
+## Guardian subagent
 
-[Describe how a process subscribes to a channel and how it publishes. Is it WebSocket, SSE, polling, message queue, etc?]
+- **Role:** veto strategy proposals; calculate FitnessReport with walls + gates; trigger halt on catastrophic-loss
+- **Dispatch trigger:** [after every Hunter mutation; ad-hoc audits]
+- **Context inherited:** [proposed mutation diff; FitnessReport so far; current portfolio + correlations]
+- **Tools allowed:** [synthetic-data, walls evaluators, portfolio-state-read, halt-publisher]
+- **Tools forbidden:** [strategy-registry-write, execution]
+- **System prompt sketch:** [draft]
 
-## Sandbox enforcement
+## Archivist subagent
 
-[Document how sandbox profiles in `infra/nemoclaw-config/sandbox-policies.yaml` are actually enforced — is it container-level egress filtering, in-process capability checks, or both?]
+- **Role:** weekly L1→L2 promotion; monthly L2→L3 synthesis; build prompt-context packs
+- **Dispatch trigger:** [Sunday 8pm ET weekly; first-of-month for Level-3]
+- **Context inherited:** [recent KB Level-1 entries; prior Level-2/3 patterns; recent execution-results]
+- **Tools allowed:** [KB-read, KB-write Levels 2/3, vector-similarity-search]
+- **Tools forbidden:** [strategy-registry-write, execution]
+- **System prompt sketch:** [draft]
 
-## Routed inference
+## Tool registration
 
-[Document how the NemoClaw inference router calls upstream LLM URLs. Confirm OpenAI-compatible endpoint forwarding works as expected.]
+[How services/trader/tools/ Python modules become OpenClaw-callable. Reference OpenClaw's tool API based on Step 1 findings.]
 
-## Phase 0 implications
+## Coordination contract
 
-[List any architectural assumptions in our specs that need adjustment based on what NemoClaw actually does. Flag deltas.]
+The main orchestrator dispatches subagents via OpenClaw's subagent dispatch primitive. Subagents do NOT talk to each other; results flow back to main, which reasons over them. Same pattern as superpowers:subagent-driven-development.
+
+## Open questions
+
+[Whatever wasn't resolvable from Step 1 sources. T6 implementation may surface more.]
 ```
 
-- [ ] **Step 3: Verify the document is complete enough to write the heartbeat agent against**
+- [ ] **Step 3: Verify the doc is sufficient to drive T6**
 
-The minimum bar: a Python developer reading this doc could write a service that successfully (a) registers with NemoClaw, (b) subscribes to one channel, (c) publishes one message. If not, expand the doc.
+A reader of this doc should know exactly what files T6 needs to create (subagent prompt files, tool registrations, blueprint config). If unclear, expand.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/research/nemoclaw-api-surface.md
-git commit -m "docs(research): document NemoClaw runtime API surface"
+git add docs/research/openclaw-subagent-model.md
+git commit -m "docs(research): design OpenClaw subagent topology for Mahoraga (Hunter/Guardian/Archivist)"
 ```
 
 ---
@@ -601,139 +628,215 @@ git commit -m "feat(vendor): freeze karpathy/autoresearch copy (LICENSE + progra
 
 ---
 
-## Task 6: NemoClaw config files (Phase 0 minimal)
+## Task 6: NemoClaw blueprint + onboarding config (REVISED)
 
 **Files:**
-- Create: `infra/nemoclaw-config/agents.yaml` (Phase 0: heartbeat only)
-- Create: `infra/nemoclaw-config/channels.yaml` (heartbeat + halt)
-- Create: `infra/nemoclaw-config/inference-routes.yaml`
-- Create: `infra/nemoclaw-config/sandbox-policies.yaml`
-- Create: `infra/nemoclaw-config/connections.yaml` (empty allowlist; populated in later phases)
+- Create: `infra/nemoclaw/blueprint.yaml` (sandbox identity, OpenClaw role description, model/provider, allowed tool list)
+- Create: `infra/nemoclaw/policies/egress.yaml` (network allowlist)
+- Create: `infra/nemoclaw/policies/filesystem.yaml` (read-only / read-write paths)
+- Create: `infra/nemoclaw/subagents/hunter.md` (subagent system prompt + tool subset)
+- Create: `infra/nemoclaw/subagents/guardian.md`
+- Create: `infra/nemoclaw/subagents/archivist.md`
+- Create: `infra/nemoclaw/onboard.env` (env-var-driven onboarding inputs for non-interactive `nemoclaw onboard`)
 
-- [ ] **Step 1: Create `agents.yaml`** (Phase 0 minimal — only the heartbeat agent)
+The original T6 wrote `agents.yaml`/`channels.yaml` for a multi-agent runtime that NemoClaw doesn't actually provide. T6 (revised) replaces those with NemoClaw-native blueprint + policies + subagent definitions per the architecture revision §5.
 
-```yaml
-# Phase 0: only the heartbeat agent. Hunter/Guardian/Archivist
-# registrations land in Phase 3.
-# Format follows integration spec §5.1; adjust based on Task 4 findings.
-agents:
-  - name: heartbeat
-    image: mahoraga/heartbeat:latest
-    sandbox: heartbeat-sandbox
-    channels:
-      subscribe: [heartbeat, halt]
-      publish: [heartbeat]
-    inference:
-      route: default
-      preferred_model: ollama/gemma4         # LiteLLM resolves to OLLAMA_MODEL env (gemma4:26b default)
-      fallback: [anthropic/claude-opus-4-7]
-```
+- [ ] **Step 1: Create `infra/nemoclaw/blueprint.yaml`**
 
-- [ ] **Step 2: Create `channels.yaml`**
+Phase 0 minimal — declares the OpenClaw sandbox identity. Hunter / Guardian / Archivist subagents register via the `subagents/` directory referenced below; tools register via Python modules under `services/trader/tools/` (Phase 1+).
 
 ```yaml
-channels:
-  - name: heartbeat
-    payload_schema: schemas/heartbeat.json
-    retention: 1d
-  - name: halt
-    payload_schema: schemas/halt_event.json
-    retention: indefinite          # audit-critical; kill-switch trail
+# NemoClaw blueprint for Mahoraga.
+# Driven by `nemoclaw onboard` (or non-interactive equivalent — see onboard.env).
+# Architecture anchor: 2026-04-26-architecture-revision-consolidated-assistant.md
+
+blueprint:
+  name: mahoraga-trader
+  description: |
+    Self-improving regime-aware autonomous trading assistant.
+    Trades US equities, ETFs, and BTC ETFs (long, swing trades).
+    Coordinates Hunter / Guardian / Archivist subagents.
+
+assistant:
+  role: |
+    You are the orchestrator of an autonomous trading system. Your job is to
+    coordinate three subagents (Hunter, Guardian, Archivist) to propose, validate,
+    archive, and execute trading strategies under hard risk limits and human
+    operator override. Never bypass the hard risk limits — they live in the
+    execution tools and reject orders that violate them, regardless of your reasoning.
+
+  inference:
+    provider: compatible-endpoints
+    base_url: ${LITELLM_BASE_URL:-http://litellm:4000/v1}
+    model: ${MAIN_MODEL:-anthropic/claude-opus-4-7}
+    fallback: [ollama/gemma4]
+
+  subagents_dir: subagents/
+  tools_dir: ../../services/trader/tools/    # Phase 1+ adds tool modules here
+
+policies:
+  network:  policies/egress.yaml
+  filesystem: policies/filesystem.yaml
+
+operator_channels:
+  telegram: ${TELEGRAM_BOT_TOKEN}             # halt / status / regime / strategy commands
+
+# Phase 6 will add a Streamlit dashboard channel here.
 ```
 
-- [ ] **Step 3: Create `schemas/heartbeat.json`** at `infra/nemoclaw-config/schemas/heartbeat.json`
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HeartbeatEvent",
-  "type": "object",
-  "required": ["agent", "ts"],
-  "properties": {
-    "agent": {"type": "string"},
-    "ts":    {"type": "string", "format": "date-time"},
-    "seq":   {"type": "integer"}
-  },
-  "additionalProperties": false
-}
-```
-
-- [ ] **Step 4: Create `schemas/halt_event.json`**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HaltEvent",
-  "type": "object",
-  "required": ["actor", "reason", "ts"],
-  "properties": {
-    "actor":  {"type": "string", "description": "who issued the halt"},
-    "reason": {"type": "string"},
-    "ts":     {"type": "string", "format": "date-time"},
-    "scope":  {"type": "string", "enum": ["all", "single-strategy"]}
-  },
-  "additionalProperties": false
-}
-```
-
-- [ ] **Step 5: Create `inference-routes.yaml`**
+- [ ] **Step 2: Create `infra/nemoclaw/policies/egress.yaml`**
 
 ```yaml
-routes:
-  default:
-    upstream: http://litellm:4000/v1
-    type: openai-compatible
-    timeout_s: 60
-    retry: 2
+# Network egress policy — explicit allowlist. Unknown hosts are blocked and
+# surfaced to the operator via NemoClaw's policy approval TUI (the operator
+# decides per-request; approvals do NOT persist to this baseline file).
+egress:
+  allowlist:
+    # LLM gateway (host or sidecar)
+    - http://litellm:4000
+    # Application database
+    - http://postgres:5432
+    # Phase 1 — market data (free APIs first)
+    - https://query1.finance.yahoo.com         # yfinance
+    - https://api.alpaca.markets                # Alpaca free tier
+    - https://data.alpaca.markets
+    - https://api.stlouisfed.org                # FRED macro
+    - https://stooq.com                         # Stooq EOD
+    - https://api.tiingo.com                    # Tiingo free tier
+    # Phase 4 — news + research (web-research subagent)
+    - https://www.federalreserve.gov
+    - https://www.sec.gov                       # EDGAR
+    - https://www.cmegroup.com                  # FedWatch
+    # Phase 5 — broker (paper, then live)
+    # - https://paper-api.alpaca.markets        # uncomment in Phase 5
+    # - https://api.alpaca.markets              # live broker (uncomment Phase 7)
+    # Phase 6 — operator notifications
+    # - https://api.telegram.org                # uncomment when Telegram bot configured
 ```
 
-- [ ] **Step 6: Create `sandbox-policies.yaml`** (Phase 0: heartbeat-sandbox only)
+- [ ] **Step 3: Create `infra/nemoclaw/policies/filesystem.yaml`**
 
 ```yaml
-sandboxes:
-  - name: heartbeat-sandbox
-    network:
-      egress_allowlist:
-        - http://litellm:4000
-        - http://postgres:5432
-    filesystem:
-      mounts:
-        - source: data/audit
-          target: /audit
-          read_only: false
-    resources:
-      memory_max: 512M
-      cpu_max: 1
+# Filesystem policy — agent's home is read-only; only specific paths writable.
+# Matches NemoClaw blueprint's standard layout per nemoclaw-user-overview/ecosystem.md.
+filesystem:
+  read_only:
+    - /sandbox                                  # entire home read-only by default
+    - /sandbox/.openclaw                        # gateway config — locked
+  read_write:
+    - /sandbox/.openclaw-data                   # OpenClaw operational data
+    - /sandbox/.nemoclaw                        # NemoClaw blueprint state
+    - /tmp                                      # transient
+    - /sandbox/data/parquet                     # feature store (mount from host)
+    - /sandbox/data/audit                       # audit log (mount from host)
 ```
 
-- [ ] **Step 7: Create empty `connections.yaml`**
+- [ ] **Step 4: Create subagent definitions** at `infra/nemoclaw/subagents/{hunter,guardian,archivist}.md`
 
-```yaml
-# Outbound integrations populated in Phase 1 (data feeds) and Phase 5 (broker).
-# Format per integration spec §5.5.
-connections: []
+Each is a markdown file with frontmatter (name, description, allowed-tools, dispatch-cadence) and a system prompt body. Use the system-prompt sketches from T4's research doc. Phase 0 versions are stubs — they get refined as the autoresearch loop matures in Phase 3.
+
+`hunter.md`:
+
+```markdown
+---
+name: hunter
+description: Proposes strategy mutations during the autoresearch loop. Returns a single mutation diff plus a brief rationale. Never executes orders. Never writes to the strategy registry directly.
+tools_allowed: [vectorbt_backtest, kb_read, regime_read, autoresearch_run_one]
+dispatch_cadence: [nightly, weekend, compressed_replay]
+---
+
+You are Hunter — the strategy-mutation proposer in the Mahoraga autoresearch loop.
+
+Your job: given a parent strategy, the current regime, and a knowledge-base context pack, propose ONE mutation that might improve the strategy's composite score (Sharpe + DSR + PBO + per-regime breakdown). Return the diff + rationale. Do NOT run the backtest yourself — the autoresearch loop tool handles that.
+
+Constraints:
+- Mutations stay within the Strategy ABC (rewrite signal()/position_size() bodies and PARAMS dict; do not change the public signature)
+- Avoid patterns the KB marks "forbidden" (Archivist surfaces these in the context pack)
+- Prefer small, single-axis changes the loop can attribute clearly
+
+Return format: a JSON object with keys {mutation_diff, rationale, expected_impact}.
 ```
 
-- [ ] **Step 8: Validate YAML syntax**
+`guardian.md`:
 
-Run:
+```markdown
+---
+name: guardian
+description: Vetoes proposed strategy mutations using the 5-wall fortress + 3-gate system. Triggers halt on catastrophic-loss conditions. Never proposes mutations.
+tools_allowed: [synthetic_data, walls_evaluate, gates_evaluate, portfolio_state_read, halt_publisher]
+dispatch_cadence: [after-each-hunter-mutation, on-demand-audit]
+---
+
+You are Guardian — the risk veto in the Mahoraga autoresearch loop.
+
+Your job: evaluate a proposed candidate strategy against the 5 anti-overfitting walls (statistical rigor, data discipline, complexity control, generalization, meta-awareness) and the 3 gates (fitness, robustness, risk). Approve only if all walls + gates pass AND the candidate's composite score improves on its parent. Otherwise return a structured veto.
+
+If portfolio state shows catastrophic loss conditions (>10% monthly drawdown OR >2% daily loss), publish a halt event regardless of strategy state.
+
+Return format: a JSON object with keys {decision: "approve"|"veto"|"halt", wall_results, gate_results, reason}.
+```
+
+`archivist.md`:
+
+```markdown
+---
+name: archivist
+description: Promotes KB Level-1 raw experiments to Level-2 patterns (weekly) and Level-2 to Level-3 meta-principles (monthly). Builds the prompt-context pack Hunter consumes. Never executes orders or proposes mutations.
+tools_allowed: [kb_read, kb_write_levels_2_3, vector_similarity_search]
+dispatch_cadence: [weekly_sunday_8pm, monthly_first_of_month]
+---
+
+You are Archivist — the meta-learner of the Mahoraga knowledge base.
+
+Weekly job: scan the past week's Level-1 experiment entries (kept and discarded). Identify recurring patterns — strategies that fail across regimes, mutations that reliably improve specific regimes, walls that are calibration-drifting. Write findings as Level-2 KB rows with embeddings.
+
+Monthly job: synthesize Level-2 patterns into Level-3 meta-principles (e.g., "in regimes where VIX is rising while breadth narrows, mean-reversion strategies degrade faster than trend-following ones — defer mean-reversion deployments until breadth re-broadens"). Write as Level-3 KB rows.
+
+Always-on: build the prompt-context pack Hunter receives, surfacing recent successes, recent failures, and "forbidden patterns" Hunter should not re-explore.
+
+Return format: a JSON object with keys {level_2_added, level_3_added, context_pack_summary}.
+```
+
+- [ ] **Step 5: Create `infra/nemoclaw/onboard.env`** for non-interactive onboarding
 
 ```bash
-python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('infra/nemoclaw-config/*.yaml')]; print('OK')"
+# Inputs for `nemoclaw onboard --non-interactive` (or scripted equivalent).
+# Source this from .env at onboarding time.
+NEMOCLAW_BLUEPRINT_PATH=infra/nemoclaw/blueprint.yaml
+NEMOCLAW_INFERENCE_PROVIDER=compatible-endpoints
+NEMOCLAW_INFERENCE_BASE_URL=${LITELLM_BASE_URL:-http://litellm:4000/v1}
+NEMOCLAW_INFERENCE_MODEL=${MAIN_MODEL:-anthropic/claude-opus-4-7}
+# Telegram bot — required for halt smoke (T10). Operator creates the bot,
+# pastes token here. Phase 6 governance refines per-chat-ID allowlist.
+NEMOCLAW_TELEGRAM_TOKEN=${TELEGRAM_BOT_TOKEN}
+NEMOCLAW_TELEGRAM_CHAT_ALLOWLIST=${TELEGRAM_CHAT_ID}
 ```
 
-Expected: `OK`.
+Add `MAIN_MODEL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` to `.env.example` so operators know they're required for full Phase 0 setup. (Operators without a Telegram bot can defer T10's full smoke until they create one — see T10 fallback path.)
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 6: Validate YAML / markdown syntax**
 
 ```bash
-git add infra/nemoclaw-config/
-git commit -m "feat(config): add Phase 0 NemoClaw config (heartbeat agent + halt channel)"
+python -c "import yaml; [yaml.safe_load(open(f)) for f in ['infra/nemoclaw/blueprint.yaml','infra/nemoclaw/policies/egress.yaml','infra/nemoclaw/policies/filesystem.yaml']]; print('YAML OK')"
+for f in infra/nemoclaw/subagents/*.md; do
+  test -s "$f" && echo "$f looks OK"
+done
+```
+
+Expected: `YAML OK` plus three `looks OK` lines.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add infra/nemoclaw/ .env.example
+git commit -m "feat(nemoclaw): add Phase 0 blueprint + policies + 3 subagent definitions"
 ```
 
 ---
 
-## Task 7: LiteLLM gateway config + Docker service
+## Task 7: LiteLLM gateway config + Docker service (LIGHT EDIT 2026-04-26)
+
+> Under the consolidated-assistant model, NemoClaw's onboarding selects "compatible-endpoints" as its inference provider and points at `http://litellm:4000/v1`. The LiteLLM config below is **unchanged in shape**; only the consumer changes. No separate `inference-routes.yaml` file is needed (it would have routed agent traffic; under one-assistant, NemoClaw's native router handles it).
 
 **Files:**
 - Create: `infra/litellm/config.yaml`
@@ -787,7 +890,9 @@ git commit -m "feat(litellm): add gateway config (Ollama primary, Anthropic fall
 
 ---
 
-## Task 8: Docker Compose root
+## Task 8: Docker Compose root (LIGHT EDIT 2026-04-26)
+
+> Under the consolidated-assistant model, the compose stack is **sidecars only**: Postgres + LiteLLM. NemoClaw runs on the host (not in compose) and orchestrates an OpenShell-managed sandbox container outside compose. The original `nemoclaw` build-from-vendor service and the `heartbeat` service are both **removed** from `docker-compose.yml`. Resulting services: `postgres`, `litellm`. Everything else in this task (volumes, ports, healthchecks, smoke commands) stands.
 
 **Files:**
 - Create: `docker-compose.yml`
@@ -912,419 +1017,270 @@ git commit -m "feat(compose): add docker-compose.yml; verified Postgres + LiteLL
 
 ---
 
-## Task 9: Heartbeat agent service (TDD)
+## Task 9: OpenClaw sandbox bring-up smoke (REVISED)
 
 **Files:**
-- Create: `services/heartbeat/Dockerfile`
-- Create: `services/heartbeat/pyproject.toml`
-- Create: `services/heartbeat/src/heartbeat/__init__.py`
-- Create: `services/heartbeat/src/heartbeat/nemoclaw_client.py`
-- Create: `services/heartbeat/src/heartbeat/main.py`
-- Create: `services/heartbeat/tests/test_heartbeat.py`
-- Create: `services/heartbeat/tests/test_nemoclaw_client.py`
+- Create: `scripts/onboard.sh` (wraps `nemoclaw onboard` with our env-driven inputs)
+- Create: `tests/integration/phase-0/test_sandbox_smoke.py`
 
-- [ ] **Step 1: Create `services/heartbeat/pyproject.toml`**
+The original T9 built a Python heartbeat agent that registered with a NemoClaw "channels" runtime that doesn't actually exist. Under the consolidated model, the equivalent walking-skeleton smoke is: run `nemoclaw onboard`, verify the sandbox boots, and confirm the OpenClaw assistant inside answers a basic prompt.
 
-```toml
-[project]
-name = "heartbeat"
-version = "0.0.0"
-requires-python = ">=3.11"
-dependencies = [
-    "httpx>=0.27",
-    "structlog>=24",
-    "pydantic>=2.7",
-]
+- [ ] **Step 1: Create `scripts/onboard.sh`** — wraps `nemoclaw onboard` with env-driven inputs
 
-[project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21"]
+```bash
+#!/usr/bin/env bash
+# Onboard a Mahoraga sandbox via NemoClaw, sourcing our blueprint + onboard.env.
+# Phase 0 smoke: brings up one OpenClaw assistant inside a NemoClaw-hardened sandbox.
+set -euo pipefail
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# Verify prerequisites
+command -v nemoclaw >/dev/null 2>&1 || { echo "FATAL: nemoclaw CLI not on PATH (install from vendor/nemoclaw/ — see README)"; exit 2; }
+command -v ollama  >/dev/null 2>&1 || { echo "FATAL: ollama not on PATH"; exit 2; }
+test -f .env || { echo "FATAL: .env missing — copy .env.example and fill in"; exit 2; }
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/heartbeat"]
+# Load env
+set -a
+source .env
+source infra/nemoclaw/onboard.env
+set +a
+
+# Run onboarding (interactive by default; pass --non-interactive when supported by current NemoClaw release)
+nemoclaw onboard \
+  --blueprint "$NEMOCLAW_BLUEPRINT_PATH" \
+  --inference-provider "$NEMOCLAW_INFERENCE_PROVIDER" \
+  --inference-base-url "$NEMOCLAW_INFERENCE_BASE_URL" \
+  --inference-model    "$NEMOCLAW_INFERENCE_MODEL" \
+  ${NEMOCLAW_TELEGRAM_TOKEN:+--telegram-token "$NEMOCLAW_TELEGRAM_TOKEN"}
+
+echo "Onboard complete. Use 'nemoclaw status' to verify, or run scripts/sandbox-smoke.sh for the test."
 ```
 
-- [ ] **Step 2: Write failing test for the NemoClaw client wrapper** at `services/heartbeat/tests/test_nemoclaw_client.py`
+`chmod +x scripts/onboard.sh`.
+
+If your installed NemoClaw release uses different flag names, update this wrapper to match — it's a thin convenience layer, not an API.
+
+- [ ] **Step 2: Write the integration smoke test** at `tests/integration/phase-0/test_sandbox_smoke.py`
 
 ```python
-import pytest
-import respx
-from httpx import Response
-from heartbeat.nemoclaw_client import NemoClawClient
-
-@pytest.fixture
-def client():
-    return NemoClawClient(agent_name="heartbeat", base_url="http://nemoclaw:8080")
-
-@respx.mock
-def test_register_posts_to_register_endpoint(client):
-    route = respx.post("http://nemoclaw:8080/agents/register").mock(return_value=Response(200, json={"ok": True}))
-    client.register()
-    assert route.called
-    body = route.calls[0].request.read().decode()
-    assert "heartbeat" in body
-
-@respx.mock
-def test_publish_posts_to_channel_endpoint(client):
-    route = respx.post("http://nemoclaw:8080/channels/heartbeat/publish").mock(return_value=Response(202))
-    client.publish("heartbeat", {"agent": "heartbeat", "ts": "2026-04-26T00:00:00Z"})
-    assert route.called
-
-@respx.mock
-def test_subscribe_returns_iterator(client):
-    respx.get("http://nemoclaw:8080/channels/halt/subscribe").mock(
-        return_value=Response(200, text='data: {"actor":"test","reason":"smoke","ts":"2026-04-26T00:00:00Z"}\n\n')
-    )
-    msgs = list(client.subscribe("halt", limit=1))
-    assert msgs[0]["actor"] == "test"
-```
-
-- [ ] **Step 3: Run test — expected to fail (no module yet)**
-
-```bash
-cd services/heartbeat && pytest tests/test_nemoclaw_client.py -v
-```
-
-Expected: `ModuleNotFoundError: No module named 'heartbeat.nemoclaw_client'`.
-
-- [ ] **Step 4: Implement `nemoclaw_client.py`**
-
-```python
-"""Thin Python wrapper around NemoClaw's HTTP API.
-
-Bound to the API surface documented in
-`docs/research/nemoclaw-api-surface.md`. If NemoClaw exposes
-something other than HTTP+SSE, adapt the implementation here only —
-the heartbeat agent itself depends on the wrapper, not on NemoClaw
-directly.
-"""
-from __future__ import annotations
-
-import json
-from typing import Any, Iterator
-
-import httpx
-
-
-class NemoClawClient:
-    def __init__(self, agent_name: str, base_url: str, timeout_s: int = 30) -> None:
-        self.agent_name = agent_name
-        self.base_url = base_url.rstrip("/")
-        self._client = httpx.Client(base_url=self.base_url, timeout=timeout_s)
-
-    def register(self) -> None:
-        r = self._client.post("/agents/register", json={"name": self.agent_name})
-        r.raise_for_status()
-
-    def publish(self, channel: str, payload: dict[str, Any]) -> None:
-        r = self._client.post(f"/channels/{channel}/publish", json=payload)
-        r.raise_for_status()
-
-    def subscribe(self, channel: str, *, limit: int | None = None) -> Iterator[dict[str, Any]]:
-        with self._client.stream("GET", f"/channels/{channel}/subscribe") as r:
-            r.raise_for_status()
-            count = 0
-            for line in r.iter_lines():
-                if not line.startswith("data: "):
-                    continue
-                yield json.loads(line[len("data: "):])
-                count += 1
-                if limit is not None and count >= limit:
-                    return
-
-    def close(self) -> None:
-        self._client.close()
-```
-
-- [ ] **Step 5: Run test — expected to pass**
-
-```bash
-cd services/heartbeat && pip install -e .[dev] && pytest tests/test_nemoclaw_client.py -v
-```
-
-Expected: 3 passed.
-
-- [ ] **Step 6: Write failing test for the heartbeat agent** at `services/heartbeat/tests/test_heartbeat.py`
-
-```python
-from unittest.mock import MagicMock
-from heartbeat.main import HeartbeatAgent
-
-def test_heartbeat_publishes_on_tick():
-    client = MagicMock()
-    agent = HeartbeatAgent(client=client, interval_s=0)
-    agent.tick()
-    client.publish.assert_called_once()
-    args, _ = client.publish.call_args
-    assert args[0] == "heartbeat"
-    assert args[1]["agent"] == "heartbeat"
-    assert "ts" in args[1]
-    assert args[1]["seq"] == 1
-
-def test_heartbeat_increments_seq():
-    client = MagicMock()
-    agent = HeartbeatAgent(client=client, interval_s=0)
-    agent.tick()
-    agent.tick()
-    seqs = [c.args[1]["seq"] for c in client.publish.call_args_list]
-    assert seqs == [1, 2]
-
-def test_halt_stops_publishing():
-    client = MagicMock()
-    agent = HeartbeatAgent(client=client, interval_s=0)
-    agent.tick()
-    agent.on_halt({"actor": "test", "reason": "smoke", "ts": "2026-04-26T00:00:00Z"})
-    agent.tick()
-    assert client.publish.call_count == 1   # second tick blocked by halt
-```
-
-- [ ] **Step 7: Run test — expected to fail (no main.py yet)**
-
-```bash
-pytest tests/test_heartbeat.py -v
-```
-
-Expected: `ModuleNotFoundError`.
-
-- [ ] **Step 8: Implement `services/heartbeat/src/heartbeat/main.py`**
-
-```python
-"""Heartbeat agent — minimal long-running service that demonstrates
-the agent boilerplate Phase 3 agents (Hunter, Guardian, Archivist)
-will reuse.
-
-- Registers with NemoClaw on startup
-- Publishes to the `heartbeat` channel every interval_s seconds
-- Subscribes to `halt`; on receipt, stops publishing
-"""
-from __future__ import annotations
-
-import os
-import signal
-import time
-from datetime import datetime, timezone
-from threading import Thread
-from typing import Any
-
-import structlog
-
-from heartbeat.nemoclaw_client import NemoClawClient
-
-log = structlog.get_logger()
-
-
-class HeartbeatAgent:
-    def __init__(self, client: Any, *, interval_s: int = 30) -> None:
-        self.client = client
-        self.interval_s = interval_s
-        self._seq = 0
-        self._halted = False
-        self._running = True
-
-    def tick(self) -> None:
-        if self._halted:
-            return
-        self._seq += 1
-        ts = datetime.now(timezone.utc).isoformat()
-        self.client.publish("heartbeat", {"agent": "heartbeat", "ts": ts, "seq": self._seq})
-        log.info("heartbeat.tick", seq=self._seq, ts=ts)
-
-    def on_halt(self, msg: dict[str, Any]) -> None:
-        self._halted = True
-        log.warning("heartbeat.halted", reason=msg.get("reason"), actor=msg.get("actor"))
-
-    def run(self) -> None:
-        while self._running:
-            self.tick()
-            time.sleep(self.interval_s)
-
-    def stop(self) -> None:
-        self._running = False
-
-
-def main() -> None:
-    base_url = os.environ.get("NEMOCLAW_BASE_URL", "http://nemoclaw:8080")
-    client = NemoClawClient(agent_name="heartbeat", base_url=base_url)
-    client.register()
-    agent = HeartbeatAgent(client=client, interval_s=int(os.environ.get("HEARTBEAT_INTERVAL_S", "30")))
-
-    def halt_listener() -> None:
-        for msg in client.subscribe("halt"):
-            agent.on_halt(msg)
-
-    Thread(target=halt_listener, daemon=True).start()
-
-    def shutdown(signum: int, _frame: Any) -> None:
-        log.info("heartbeat.shutdown", signal=signum)
-        agent.stop()
-
-    signal.signal(signal.SIGTERM, shutdown)
-    signal.signal(signal.SIGINT, shutdown)
-    agent.run()
-
-
-if __name__ == "__main__":
-    main()
-```
-
-- [ ] **Step 9: Add `__init__.py`**
-
-```python
-# services/heartbeat/src/heartbeat/__init__.py
-__all__ = ["main"]
-```
-
-- [ ] **Step 10: Run all heartbeat tests**
-
-```bash
-cd services/heartbeat && pytest tests/ -v
-```
-
-Expected: 6 passed (3 client + 3 agent).
-
-- [ ] **Step 11: Create `services/heartbeat/Dockerfile`**
-
-```dockerfile
-FROM python:3.11-slim AS base
-WORKDIR /app
-COPY pyproject.toml .
-COPY src/ src/
-RUN pip install --no-cache-dir -e .
-CMD ["python", "-m", "heartbeat.main"]
-```
-
-- [ ] **Step 12: Build the image and verify**
-
-```bash
-docker compose build heartbeat
-```
-
-Expected: image builds cleanly.
-
-- [ ] **Step 13: Commit**
-
-```bash
-git add services/heartbeat/
-git commit -m "feat(heartbeat): add heartbeat agent (NemoClaw client wrapper + agent + tests)"
-```
-
----
-
-## Task 10: Halt-channel smoke test
-
-**Files:**
-- Create: `tests/integration/phase-0/test_halt_smoke.py`
-
-- [ ] **Step 1: Bring full stack up**
-
-```bash
-make up
-docker compose ps
-```
-
-Expected: postgres healthy, litellm up, nemoclaw up, heartbeat up. Wait ~5s for heartbeat to register.
-
-- [ ] **Step 2: Verify heartbeat is publishing**
-
-```bash
-docker logs --tail 20 mahoraga-heartbeat
-```
-
-Expected: structured log lines `heartbeat.tick seq=N ts=...`.
-
-- [ ] **Step 3: Write failing integration test** at `tests/integration/phase-0/test_halt_smoke.py`
-
-```python
-"""Halt-channel smoke test.
-
-Publishes a halt event to NemoClaw's `halt` channel and asserts the
-heartbeat agent stops publishing within 1 second (architecture spec
-§5.6 contract: <1s halt response).
+"""OpenClaw-in-NemoClaw sandbox bring-up smoke.
+
+Phase 0 walking-skeleton verification: after `scripts/onboard.sh` has run,
+the sandbox is up, the OpenClaw assistant responds to a basic prompt, and
+inference flows through LiteLLM (verified via cost-log delta).
 """
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
 
-import httpx
 import pytest
-
-NEMOCLAW = os.environ.get("NEMOCLAW_TEST_URL", "http://localhost:8080")
-HEARTBEAT_CONTAINER = "mahoraga-heartbeat"
-
-
-def _last_heartbeat_seq() -> int | None:
-    out = subprocess.run(
-        ["docker", "logs", "--tail", "5", HEARTBEAT_CONTAINER],
-        check=True, capture_output=True, text=True,
-    ).stdout
-    seqs = [int(s.split("seq=")[1].split()[0]) for s in out.splitlines() if "seq=" in s]
-    return seqs[-1] if seqs else None
 
 
 @pytest.mark.integration
-def test_halt_stops_heartbeat_within_1s():
-    pre = _last_heartbeat_seq()
-    assert pre is not None, "heartbeat not running before halt"
+def test_sandbox_status_running():
+    """`nemoclaw status` reports the Mahoraga sandbox as running."""
+    out = subprocess.run(
+        ["nemoclaw", "status", "--name", "mahoraga-trader"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert out.returncode == 0, f"nemoclaw status failed: {out.stderr}"
+    assert "running" in out.stdout.lower(), f"unexpected status output: {out.stdout!r}"
 
-    httpx.post(
-        f"{NEMOCLAW}/channels/halt/publish",
-        json={
-            "actor": "phase-0-smoke-test",
-            "reason": "halt-channel smoke",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "scope": "all",
-        },
-        timeout=5,
-    ).raise_for_status()
 
-    time.sleep(1.5)
-    seq_t1 = _last_heartbeat_seq()
-    time.sleep(2.0)
-    seq_t2 = _last_heartbeat_seq()
+@pytest.mark.integration
+def test_sandbox_responds_to_basic_prompt():
+    """OpenClaw assistant inside the sandbox answers a hello prompt within 30s."""
+    out = subprocess.run(
+        ["nemoclaw", "ask", "--name", "mahoraga-trader",
+         "--prompt", "Reply with the single word OK."],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert out.returncode == 0, f"nemoclaw ask failed: {out.stderr}"
+    assert "OK" in out.stdout, f"unexpected response: {out.stdout!r}"
 
-    # Within 1s of halt, no NEW seq should appear; allow at most one trailing tick
-    assert seq_t2 - (seq_t1 or 0) <= 0, f"heartbeat still publishing after halt: {seq_t1} -> {seq_t2}"
+
+@pytest.mark.integration
+def test_inference_flowed_through_litellm():
+    """Calling the assistant should bump LiteLLM's request counter by ≥1."""
+    pre  = _litellm_request_count()
+    subprocess.run(["nemoclaw", "ask", "--name", "mahoraga-trader",
+                    "--prompt", "Hello."],
+                   check=True, capture_output=True, timeout=60)
+    time.sleep(1)  # cost-log flush
+    post = _litellm_request_count()
+    assert post > pre, f"LiteLLM request count did not advance ({pre} → {post})"
+
+
+def _litellm_request_count() -> int:
+    """Read the LiteLLM /metrics endpoint and return total request count, or 0 if missing."""
+    import httpx
+    base = os.environ.get("LITELLM_BASE_URL", "http://localhost:4000/v1")
+    metrics = base.rstrip("/v1") + "/metrics"
+    try:
+        r = httpx.get(metrics, timeout=5)
+        # LiteLLM may expose simple JSON or Prometheus; just look for a numeric requests line
+        for line in r.text.splitlines():
+            if "litellm_requests_total" in line and "{" not in line:
+                return int(float(line.split()[-1]))
+    except (httpx.HTTPError, ValueError):
+        pass
+    return 0
 ```
 
-- [ ] **Step 4: Run integration test**
+- [ ] **Step 3: Run the smoke test (after onboard succeeds on the host)**
 
 ```bash
-pytest tests/integration/phase-0/test_halt_smoke.py -v -m integration
+./scripts/onboard.sh                                                          # one-time onboarding
+pytest tests/integration/phase-0/test_sandbox_smoke.py -v -m integration
 ```
 
-Expected: PASS within ~5s.
+Expected: 3 tests pass. If `nemoclaw onboard` requires an interactive flow on the current release and the user declines automation, mark these tests skipped with a `pytest.mark.skipif` based on a `MAHORAGA_SANDBOX_READY=true` env var, document the manual onboard path in `docs/research/openclaw-subagent-model.md`, and continue. Phase 6 governance will revisit the automation story.
 
-- [ ] **Step 5: Add `pytest` markers config** to root `pyproject.toml`
+- [ ] **Step 4: Commit**
+
+```bash
+git add scripts/onboard.sh tests/integration/phase-0/test_sandbox_smoke.py
+git commit -m "feat(sandbox): add NemoClaw onboard wrapper + Phase 0 sandbox smoke test"
+```
+
+---
+
+## Task 10: Halt smoke via Telegram + audit-log (REVISED)
+
+**Files:**
+- Create: `tests/integration/phase-0/test_halt_smoke.py`
+
+The original T10 published to a `halt` channel that doesn't exist under the consolidated model. The revised halt contract (architecture revision §6) says: operator sends `/halt` (Telegram or `nemoclaw stop` CLI fallback), the assistant suspends tool use within 1s, and the halt event lands in `audit.events`.
+
+Phase 0 verifies the audit-log + CLI-stop path. Telegram path is a Phase 6 governance concern (the bot needs operator-side setup that's out of Phase 0 scope unless the operator already has one).
+
+- [ ] **Step 1: Add `pytest` markers to root `pyproject.toml`**
 
 ```toml
 [tool.pytest.ini_options]
 testpaths = ["tests", "services"]
 addopts = "-ra -q"
 markers = [
-    "integration: requires docker compose stack to be up",
+    "integration: requires the NemoClaw sandbox to be onboarded and running",
 ]
 ```
 
-- [ ] **Step 6: Tear down**
+- [ ] **Step 2: Write the halt-smoke integration test** at `tests/integration/phase-0/test_halt_smoke.py`
 
-```bash
-make down
+```python
+"""Halt smoke for the consolidated-assistant model.
+
+Phase 0 verifies two things:
+1. CLI-fallback halt: `nemoclaw stop` suspends the assistant; the audit log
+   records a halt event with `actor='operator-cli'`.
+2. Audit-log halt-poll path: a halt row inserted directly into `audit.events`
+   is visible to the polling check used by trade-execution tools (Phase 5+).
+
+Telegram-based halt is verified in Phase 6 governance once the operator's
+bot is set up.
+"""
+import os
+import subprocess
+import time
+
+import psycopg
+import pytest
+
+DSN = os.environ.get("MAHORAGA_TEST_DSN",
+                     "postgresql://postgres:change_me_locally@localhost:5432/postgres")
+
+
+def _audit_count(action: str) -> int:
+    with psycopg.connect(DSN) as c:
+        cur = c.execute("SELECT COUNT(*) FROM audit.events WHERE action = %s", (action,))
+        return cur.fetchone()[0]
+
+
+@pytest.mark.integration
+def test_cli_halt_suspends_and_audits():
+    """`nemoclaw stop` halts the assistant and writes a halt event."""
+    pre = _audit_count("halt")
+    out = subprocess.run(
+        ["nemoclaw", "stop", "--name", "mahoraga-trader",
+         "--reason", "phase-0-halt-smoke"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert out.returncode == 0, f"nemoclaw stop failed: {out.stderr}"
+
+    # Allow up to 2s for the halt event to be written
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if _audit_count("halt") > pre:
+            break
+        time.sleep(0.1)
+    post = _audit_count("halt")
+    assert post == pre + 1, f"halt event not recorded ({pre} → {post})"
+
+
+@pytest.mark.integration
+def test_audit_poll_path_visible():
+    """A halt row inserted to audit.events is observable within 2s (the poll fallback)."""
+    with psycopg.connect(DSN, autocommit=True) as c:
+        c.execute(
+            "INSERT INTO audit.events (actor, action, payload, hash) "
+            "VALUES (%s, %s, %s::jsonb, decode(%s,'hex'))",
+            ("phase-0-test", "halt", '{"reason":"poll-path-check"}', "00" * 32),
+        )
+
+    deadline = time.monotonic() + 2.0
+    seen = False
+    with psycopg.connect(DSN) as c:
+        while time.monotonic() < deadline and not seen:
+            cur = c.execute(
+                "SELECT 1 FROM audit.events "
+                "WHERE action = 'halt' AND payload->>'reason' = 'poll-path-check'"
+            )
+            seen = cur.fetchone() is not None
+            if not seen:
+                time.sleep(0.1)
+    assert seen, "halt event not visible to poll path within 2s"
+
+
+@pytest.mark.integration
+def test_resume_clears_halt():
+    """`nemoclaw resume` records a `halt_clear` event."""
+    pre = _audit_count("halt_clear")
+    out = subprocess.run(
+        ["nemoclaw", "resume", "--name", "mahoraga-trader"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert out.returncode == 0, f"nemoclaw resume failed: {out.stderr}"
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if _audit_count("halt_clear") > pre:
+            break
+        time.sleep(0.1)
+    assert _audit_count("halt_clear") == pre + 1
 ```
 
-- [ ] **Step 7: Commit**
+If your installed NemoClaw release doesn't expose `nemoclaw stop` / `nemoclaw resume` exactly as named, adapt the subprocess calls to match (e.g., `nemoclaw sandbox stop`). The audit-log assertion still holds — those records must be written by NemoClaw or by a thin wrapper we add.
+
+- [ ] **Step 3: Run the test (after onboard succeeds and Postgres is up)**
+
+```bash
+make up                                                                      # postgres + litellm sidecars
+./scripts/onboard.sh                                                         # if not already done
+pytest tests/integration/phase-0/test_halt_smoke.py -v -m integration
+```
+
+Expected: 3 tests pass.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tests/integration/phase-0/test_halt_smoke.py pyproject.toml
-git commit -m "test(phase-0): add halt-channel smoke test (verifies §5.6 contract)"
+git commit -m "test(phase-0): add halt smoke (CLI-stop + audit-log poll path)"
 ```
 
 ---
 
-## Task 11: CI pipeline (GitHub Actions)
+## Task 11: CI pipeline (GitHub Actions) (LIGHT EDIT 2026-04-26)
+
+> Under the consolidated-assistant model, CI's `unit-tests` job no longer installs/runs the heartbeat package (it doesn't exist). Replace those steps with: install root project deps + run `pytest -m "not integration"` over `tests/`. The `integration-smoke` job stays the same shape but tests `tests/integration/phase-0/test_postgres_migrations.py` (and on a self-hosted Apple-Silicon runner with NemoClaw installed, also `test_sandbox_smoke.py` and `test_halt_smoke.py` — but GitHub-hosted Linux can only run the Postgres test).
 
 **Files:**
 - Create: `.github/workflows/ci.yml`

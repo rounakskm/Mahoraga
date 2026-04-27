@@ -5,6 +5,8 @@
 **Companion spec:** [`2026-04-25-mahoraga-architecture-decomposition.md`](2026-04-25-mahoraga-architecture-decomposition.md)
 **Phases unblocked:** 0 (substrate bring-up), 1 (foundation), 2 (five walls), 3 (autoresearch loop core)
 
+> **⚠️ Substrate-layer revision (2026-04-26):** §4.5, §4.6, §5.1, §5.2, §5.4, §5.5 of this spec are superseded by [`2026-04-26-architecture-revision-consolidated-assistant.md`](2026-04-26-architecture-revision-consolidated-assistant.md). NemoClaw runs **one** OpenClaw assistant per sandbox; Hunter / Guardian / Archivist become OpenClaw subagents (shared tools, separate contexts), not separate agent containers. The `agents.yaml` / `channels.yaml` configuration model is replaced by NemoClaw's native blueprint + onboarding flow. The autoresearch loop (§6), Docker compose topology (§7 — minus heartbeat), and upstream tracking (§8) are unchanged.
+
 ---
 
 ## 1. Goal & Scope

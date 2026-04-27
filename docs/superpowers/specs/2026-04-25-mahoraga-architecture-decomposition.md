@@ -5,6 +5,8 @@
 **Source plan:** [`docs/project_plan/MAHORAGA_PROJECT_PLAN.md`](../../project_plan/MAHORAGA_PROJECT_PLAN.md)
 **Companion spec:** [`2026-04-25-nemoclaw-autoresearch-integration.md`](2026-04-25-nemoclaw-autoresearch-integration.md)
 
+> **⚠️ Substrate-layer revision (2026-04-26):** §3.2, §3.3, §5.1, and §5.6 of this spec are partially superseded by [`2026-04-26-architecture-revision-consolidated-assistant.md`](2026-04-26-architecture-revision-consolidated-assistant.md). Hunter / Guardian / Archivist are now OpenClaw subagents inside one NemoClaw-hardened sandbox, not separate always-on agent containers. Application-layer concerns (data, walls, autoresearch loop, hard risk limits) are unchanged.
+
 ---
 
 ## 1. Vision & Problem Statement
