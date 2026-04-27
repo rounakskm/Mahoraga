@@ -1,0 +1,21 @@
+# Docker-Ollama fallback — uncomment to use containerized Ollama instead of
+# host Ollama. Loses Metal acceleration on macOS (slower); useful only for
+# cross-platform reproducibility or non-Apple-Silicon environments.
+# Activate with:
+#   docker compose -f docker-compose.yml -f infra/ollama/docker-compose.override.yml up
+
+# services:
+#   ollama:
+#     image: ollama/ollama:latest
+#     container_name: mahoraga-ollama
+#     ports: ["11434:11434"]
+#     volumes:
+#       - ./data/ollama:/root/.ollama
+#     environment:
+#       - OLLAMA_KEEP_ALIVE=24h
+#     # On Linux with NVIDIA GPU only:
+#     # deploy:
+#     #   resources:
+#     #     reservations:
+#     #       devices:
+#     #         - capabilities: [gpu]
