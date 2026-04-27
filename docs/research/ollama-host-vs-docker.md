@@ -25,12 +25,17 @@
    ```
 3. Pull the model into the container:
    ```bash
-   docker exec mahoraga-ollama ollama pull $OLLAMA_MODEL
+   # Either source .env first so $OLLAMA_MODEL reflects your current selection:
+   source .env && docker exec mahoraga-ollama ollama pull "$OLLAMA_MODEL"
+   # Or pull the explicit tag:
+   docker exec mahoraga-ollama ollama pull gemma4:26b
    ```
 
 ## Switching between 26b and e4b
 
 Comment/uncomment the `OLLAMA_MODEL` line in `.env`. The LiteLLM gateway picks up the change on container restart (`make down && make up`).
+
+**If `gemma4:*` tags don't resolve in Ollama's library**, use `gemma3:27b` and `gemma3n:e4b` instead and update `.env` accordingly. Architecture spec §3.4 explicitly permits this interim until Gemma 4 lands in Ollama.
 
 ## Current model availability
 
