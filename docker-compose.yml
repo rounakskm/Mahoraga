@@ -1,0 +1,45 @@
+name: mahoraga
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mahoraga-postgres
+    ports: ["5432:5432"]
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./infra/postgres/migrations:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: mahoraga-litellm
+    ports: ["4000:4000"]
+    volumes:
+      - ./infra/litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# Note: NemoClaw is NOT a Docker compose service. It runs on the host
+# as a CLI (Node 22+) and orchestrates an OpenShell-managed sandbox
+# outside of compose. Use scripts/onboard.sh after `make up` to bring
+# the assistant online. Postgres + LiteLLM are the only sidecars.
+
+# All persistence uses bind mounts under ./data/ (host filesystem) rather
+# than named volumes, so backups, inspection, and migration to cloud are
+# straightforward.

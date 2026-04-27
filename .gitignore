@@ -218,8 +218,10 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Mahoraga additions
-# parquet, db volumes, audit logs
-data/
+# parquet, db volumes, audit logs — ignore contents; track directory stubs
+data/**
+!data/**/.gitkeep
+!data/.gitkeep
 .env
 *.pyc
 __pycache__/
