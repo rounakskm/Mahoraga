@@ -166,6 +166,141 @@ git commit -m "chore(repo): add repo skeleton (Makefile, .env.example, pyproject
 
 ---
 
+## Task 1.5: Ollama setup with Gemma 4 (host primary, Docker fallback)
+
+**Files:**
+- Modify: `.env.example` (add `OLLAMA_MODEL` with switch comment)
+- Create: `infra/ollama/docker-compose.override.yml` (commented-out Docker-Ollama option)
+- Create: `docs/research/ollama-host-vs-docker.md` (decision rationale)
+
+The architecture spec §4.4 puts Ollama on the **host** for Apple Silicon Metal acceleration (containerizing Ollama on macOS loses Metal). This task sets up the primary host path with a Docker-Ollama fallback documented but commented out. Phase 3 compressed-replay throughput depends on this — Metal vs CPU is roughly a 5–10× difference for Gemma 4 26b.
+
+- [ ] **Step 1: Pull Gemma 4 models on host**
+
+Run on the macOS host (not in any container):
+
+```bash
+ollama pull gemma4:26b           # primary — higher quality, slower
+ollama pull gemma4:e4b           # fallback — faster, lower quality
+ollama list                      # verify both tags present
+```
+
+If `gemma4:*` tags don't yet resolve in Ollama's library, fall back to latest Gemma 3 (e.g. `gemma3:27b` and `gemma3n:e4b`) and update `.env` accordingly. Architecture spec §3.4 explicitly permits this interim.
+
+- [ ] **Step 2: Verify Ollama is serving on host**
+
+```bash
+curl -s http://localhost:11434/api/tags | python -m json.tool | grep -E '"name"' | head -10
+```
+
+Expected: JSON entries listing both pulled tags.
+
+- [ ] **Step 3: Add `OLLAMA_MODEL` to `.env.example`** with switch comment
+
+Append after the existing `OLLAMA_HOST` line:
+
+```bash
+# Local model — switch by commenting/uncommenting (default: 26b primary)
+OLLAMA_MODEL=gemma4:26b
+# OLLAMA_MODEL=gemma4:e4b              # fallback if 26b is too slow on this hardware
+```
+
+- [ ] **Step 4: Add `OLLAMA_MODEL` to `scripts/check-env.sh` required list**
+
+Update the `required=(...)` line:
+
+```bash
+required=(ANTHROPIC_API_KEY POSTGRES_PASSWORD OLLAMA_HOST OLLAMA_MODEL)
+```
+
+- [ ] **Step 5: Document the host-vs-Docker decision** at `docs/research/ollama-host-vs-docker.md`
+
+```markdown
+# Ollama: host vs Docker
+
+**Decision:** Ollama runs on the **host**, not containerized. See architecture spec §4.4.
+
+## Why host
+
+- Apple Silicon Metal GPU acceleration is lost when Ollama runs inside Docker on macOS. Empirically ~5–10× slowdown for Gemma 4 26b inference. Phase 3 compressed-replay schedule depends on the faster path.
+- Containers reach host Ollama via `host.docker.internal:11434` (Docker Desktop) or the equivalent on Colima.
+
+## When you might want Docker Ollama
+
+- Cross-platform CI on Linux runners where Metal isn't available anyway
+- A non-Apple-Silicon dev box (Linux/Windows) where containerized Ollama is the cleaner setup
+- Reproducibility experiments where host-state variance is undesirable
+
+## How to switch to Docker Ollama
+
+1. Edit `.env`:
+   ```
+   OLLAMA_HOST=http://ollama:11434
+   ```
+2. Compose with the override:
+   ```bash
+   docker compose -f docker-compose.yml -f infra/ollama/docker-compose.override.yml up
+   ```
+3. Pull the model into the container:
+   ```bash
+   docker exec mahoraga-ollama ollama pull $OLLAMA_MODEL
+   ```
+
+## Switching between 26b and e4b
+
+Comment/uncomment the `OLLAMA_MODEL` line in `.env`. The LiteLLM gateway picks up the change on container restart (`make down && make up`).
+```
+
+- [ ] **Step 6: Provide Docker-Ollama fallback** at `infra/ollama/docker-compose.override.yml`
+
+```yaml
+# Docker-Ollama fallback — uncomment to use containerized Ollama instead of
+# host Ollama. Loses Metal acceleration on macOS (slower); useful only for
+# cross-platform reproducibility or non-Apple-Silicon environments.
+# Activate with:
+#   docker compose -f docker-compose.yml -f infra/ollama/docker-compose.override.yml up
+
+# services:
+#   ollama:
+#     image: ollama/ollama:latest
+#     container_name: mahoraga-ollama
+#     ports: ["11434:11434"]
+#     volumes:
+#       - ./data/ollama:/root/.ollama
+#     environment:
+#       - OLLAMA_KEEP_ALIVE=24h
+#     # On Linux with NVIDIA GPU only:
+#     # deploy:
+#     #   resources:
+#     #     reservations:
+#     #       devices:
+#     #         - capabilities: [gpu]
+```
+
+- [ ] **Step 7: Verify env switching works**
+
+```bash
+# Default: 26b
+grep '^OLLAMA_MODEL=' .env || echo "OLLAMA_MODEL=gemma4:26b" >> .env
+echo "Selected: $(grep '^OLLAMA_MODEL=' .env)"
+
+# Smoke a direct Ollama call against the active model
+curl -s http://localhost:11434/api/generate \
+  -d "{\"model\":\"$(grep '^OLLAMA_MODEL=' .env | cut -d= -f2)\",\"prompt\":\"Reply with OK\",\"stream\":false}" \
+  | python -c "import sys,json; print(json.load(sys.stdin)['response'][:32])"
+```
+
+Expected: response substring contains `OK` (or similar short reply).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add .env.example scripts/check-env.sh infra/ollama/docker-compose.override.yml docs/research/ollama-host-vs-docker.md
+git commit -m "feat(ollama): add Gemma 4 setup (26b primary / e4b fallback; host primary, Docker option)"
+```
+
+---
+
 ## Task 2: Postgres migrations
 
 **Files:**
@@ -490,7 +625,7 @@ agents:
       publish: [heartbeat]
     inference:
       route: default
-      preferred_model: ollama/gemma4:latest
+      preferred_model: ollama/gemma4         # LiteLLM resolves to OLLAMA_MODEL env (gemma4:26b default)
       fallback: [anthropic/claude-opus-4-7]
 ```
 
@@ -607,10 +742,11 @@ git commit -m "feat(config): add Phase 0 NemoClaw config (heartbeat agent + halt
 
 ```yaml
 model_list:
-  # Local primary — reaches host Ollama via the docker host bridge
+  # Local primary — alias `ollama/gemma4`; actual tag picked from OLLAMA_MODEL env
+  # (gemma4:26b default; gemma4:e4b fallback — switched in .env per T1.5)
   - model_name: ollama/gemma4
     litellm_params:
-      model: ollama/gemma4
+      model: ollama/${OLLAMA_MODEL}
       api_base: ${OLLAMA_HOST:-http://host.docker.internal:11434}
   # Cloud fallback — Anthropic
   - model_name: anthropic/claude-opus-4-7
@@ -1340,12 +1476,13 @@ def one_call() -> float:
 
 
 def main() -> None:
+    actual_tag = os.environ.get("OLLAMA_MODEL", "unknown")
     durations = [one_call() for _ in range(N)]
     median = statistics.median(durations)
     p90 = sorted(durations)[int(0.9 * N) - 1]
     per_hour = 3600.0 / median
     row = (
-        f"| {datetime.now(timezone.utc).isoformat()} | {MODEL} | {N} | "
+        f"| {datetime.now(timezone.utc).isoformat()} | {MODEL} ({actual_tag}) | {N} | "
         f"{median:.2f}s median | {p90:.2f}s p90 | {per_hour:.1f}/hr |"
     )
     out_path = "docs/measurements/phase-0-llm-throughput.md"
@@ -1353,8 +1490,10 @@ def main() -> None:
         with open(out_path, "w") as f:
             f.write(
                 "# Bootstrap LLM throughput measurements\n\n"
-                "Phase 0 acceptance: target ≥30 mutations/hour on this hardware.\n\n"
-                "| date (UTC) | model | N | latency median | latency p90 | throughput |\n"
+                "Phase 0 acceptance: target ≥30 mutations/hour on this hardware.\n"
+                "The model column shows the LiteLLM alias and the actual Ollama tag in parens "
+                "(driven by `OLLAMA_MODEL` env per T1.5).\n\n"
+                "| date (UTC) | model (tag) | N | latency median | latency p90 | throughput |\n"
                 "|---|---|---|---|---|---|\n"
             )
     with open(out_path, "a") as f:

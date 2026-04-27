@@ -7,12 +7,13 @@ Companion to [`plan.md`](plan.md). The plan defines what each task does step-by-
 ```mermaid
 graph TD
     T1["T1: Repo skeleton<br/>(Makefile, .env.example,<br/>pyproject, env-check)"]
+    T1A["T1.5: Ollama setup<br/>(Gemma 4 26b/e4b host pull,<br/>env switch, Docker fallback)"]
     T2["T2: Postgres migrations<br/>(extensions, schemas, audit)"]
     T3["T3: NemoClaw subtree<br/>(git subtree add)"]
     T4["T4: NemoClaw API discovery<br/>(read sources, document)"]
     T5["T5: autoresearch frozen<br/>(LICENSE, references)"]
     T6["T6: NemoClaw config<br/>(agents, channels, sandbox)"]
-    T7["T7: LiteLLM gateway config<br/>(Ollama + Anthropic)"]
+    T7["T7: LiteLLM gateway config<br/>(Ollama + Anthropic;<br/>OLLAMA_MODEL substitution)"]
     T8["T8: Docker Compose root<br/>(stack up; verify Postgres + LiteLLM)"]
     T9["T9: Heartbeat agent (TDD)<br/>(client + agent + tests + Dockerfile)"]
     T10["T10: Halt-channel smoke<br/>(integration test)"]
@@ -21,10 +22,11 @@ graph TD
     T13["T13: README + Makefile finalization"]
     T14["T14: Phase 0 exit verification<br/>(subtree pull, smoke, throughput, milestone tag)"]
 
+    T1 --> T1A
     T1 --> T2
     T1 --> T3
     T1 --> T5
-    T1 --> T7
+    T1A --> T7
     T3 --> T4
     T4 --> T6
     T4 --> T9
@@ -47,14 +49,15 @@ graph TD
 | # | Task | Depends on | Parallel-eligible with | TDD? |
 |---|---|---|---|---|
 | 1 | Repo skeleton | — | — | n/a (infra) |
-| 2 | Postgres migrations | T1 | T3, T5, T7 | yes (test_postgres_migrations.py) |
-| 3 | NemoClaw subtree | T1 | T2, T5, T7 | n/a (verify-via-shell) |
-| 4 | NemoClaw API discovery | T3 | T2, T5, T7 | n/a (research doc) |
-| 5 | autoresearch frozen | T1 | T2, T3, T7 | n/a (verify-via-shell) |
-| 6 | NemoClaw config | T4 | T7 | n/a (yaml-validate) |
-| 7 | LiteLLM gateway config | T1 | T2, T3, T5, T6 | n/a (config) |
+| 1.5 | Ollama setup (Gemma 4 26b/e4b, host primary) | T1 | T2, T3, T5 | n/a (manual pull + verify) |
+| 2 | Postgres migrations | T1 | T1.5, T3, T5 | yes (test_postgres_migrations.py) |
+| 3 | NemoClaw subtree | T1 | T1.5, T2, T5 | n/a (verify-via-shell) |
+| 4 | NemoClaw API discovery | T3 | T7 | n/a (research doc) |
+| 5 | autoresearch frozen | T1 | T1.5, T2, T3 | n/a (verify-via-shell) |
+| 6 | NemoClaw config | T4 | — | n/a (yaml-validate) |
+| 7 | LiteLLM gateway config | T1.5 | T4 | n/a (config) |
 | 8 | Docker Compose root | T2, T6, T7 | — | yes (run Postgres smoke) |
-| 9 | Heartbeat agent | T4, T8 | T11 | yes (full TDD) |
+| 9 | Heartbeat agent | T4, T8 | T12 | yes (full TDD) |
 | 10 | Halt-channel smoke | T9 | T11, T12 | yes (integration test) |
 | 11 | CI pipeline | T9 | T10, T12 | n/a (workflow YAML; verified by green run) |
 | 12 | LLM throughput | T7 | T9, T10, T11 | n/a (measurement) |
@@ -68,13 +71,13 @@ If multiple subagents are available, this is the optimal wave plan. Each wave's 
 | Wave | Tasks running concurrently | Why |
 |---|---|---|
 | 0 | T1 | Foundation; everything depends on it |
-| 1 | T2, T3, T5, T7 | All depend only on T1; no cross-dependencies |
-| 2 | T4 | Depends on T3 (NemoClaw source must be vendored before reading it) |
+| 1 | T1.5, T2, T3, T5 | All depend only on T1 |
+| 2 | T4, T7 | T4 after T3 (NemoClaw vendored); T7 after T1.5 (OLLAMA_MODEL env defined) |
 | 3 | T6 | Depends on T4 (config shape informed by API discovery) |
 | 4 | T8 | Depends on T2, T6, T7 (compose orchestrates everything) |
 | 5 | T9, T12 | T9 needs T4+T8; T12 needs only T7 — both eligible now |
 | 6 | T10, T11 | Both depend on T9; eligible together |
-| 7 | T13 | After T8 (depended on but T13 needed Make/Compose finalized) |
+| 7 | T13 | After T8 (depended on but T13 needs Make/Compose finalized) |
 | 8 | T14 | Final verification — depends on T10, T11, T12, T13 |
 
 ## Critical path
