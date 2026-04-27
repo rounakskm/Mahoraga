@@ -23,10 +23,12 @@ The novel contribution is the **convergence model**: 7+ years of historical mark
 
 ### In scope
 
-- US equities (S&P 500 + Russell 1000 universe)
+- US equities (S&P 500 + Russell 1000 with point-in-time constituents)
+- US-listed ETFs — broad market (SPY, QQQ, IWM), sector (XLF, XLK, XLE, XLV, etc.), commodity, and BTC ETFs (IBIT, FBTC, GBTC, BITB, ARKB)
+- Bitcoin exposure **via BTC ETFs only** (in scope from Phase 1). Spot BTC and BTC options deferred to Phase 8 expansion.
 - Swing trades, holding period 1 day to 6 weeks
-- Long positions in Phase 1–7
-- Real-time news ingestion and classification
+- Long positions in Phases 1–7 (shorts in Phase 8)
+- Real-time news ingestion and classification (incl. BTC-relevant news for BTC-ETF symbols)
 - Regime detection across three time horizons (MACRO 3–18 mo, MESO 2–8 wk, MICRO 1–5 d)
 - Autonomous strategy proposal, validation, deployment, and retirement
 - Hard risk limits enforced at execution boundary, not as advisory checks
@@ -34,10 +36,12 @@ The novel contribution is the **convergence model**: 7+ years of historical mark
 
 ### Out of scope (explicitly)
 
+- Spot cryptocurrency, including spot BTC — Phase 8 expansion track (8c)
+- Cryptocurrencies other than Bitcoin (no ETH, SOL, etc. — even via ETFs)
 - Leverage trading
-- Cryptocurrency
-- Fixed income, forex, derivatives (Phase 8+ at earliest)
-- Short selling (Phase 8+ at earliest)
+- Options — Phase 8 expansion (8a)
+- Short selling — Phase 8 expansion (8b)
+- Fixed income (bonds), forex, commodity futures
 - Multi-currency or international equities
 - Intraday or day trading (system targets swing trades)
 - High-frequency strategies
