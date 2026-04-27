@@ -218,7 +218,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Mahoraga additions
-data/                  # parquet, db volumes, audit logs
+# parquet, db volumes, audit logs
+data/
 .env
 *.pyc
 __pycache__/

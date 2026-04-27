@@ -8,4 +8,8 @@ for var in "${required[@]}"; do
     missing=$((missing + 1))
   fi
 done
-[[ $missing -eq 0 ]] && echo "All required env vars present" || exit 1
+if [[ $missing -eq 0 ]]; then
+  echo "All required env vars present"
+else
+  exit 1
+fi
