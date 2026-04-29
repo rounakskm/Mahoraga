@@ -134,6 +134,8 @@ How we work in this repo. Not optional — these keep the project on rails.
 
 6. **Build skills and scripts when a pattern repeats.** If we find ourselves doing the same multi-step thing more than twice (a setup, a test, a deploy step), extract it into a Claude Code skill or a repeatable test script. Goal: steadily reduce manual repetition as the project matures.
 
+7. **Substrate-portable application code.** The agent runtime (currently NemoClaw + OpenClaw) is one specific choice; we keep the option to swap it open. Domain code (data ingestion, regime detector, walls, synthetic-data, autoresearch loop, KB writers, hard-limit firewall, broker integration) lives at `services/trader/` as plain Python modules with clean interfaces — **no runtime-specific glue inside the domain code**. Substrate adapters (subagent definitions, blueprint config, halt mechanism) live at `infra/nemoclaw/`. If we ever migrate substrates, we rewrite `infra/<new-runtime>/` and the thin tool-registration layer; the domain code transfers unchanged.
+
 ## Open questions to resolve as we go
 
 Selected items only; the full lists live in the spec files (architecture spec §9 covers cross-cutting questions; integration spec §10 covers integration-scoped questions). The non-trivial items that shape near-term work:
