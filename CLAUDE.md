@@ -20,6 +20,7 @@ NemoClaw (vendored at `vendor/nemoclaw/`) is the substrate — agent OS providin
 |---|---|---|
 | Agent substrate | NVIDIA/NemoClaw, vendored as `git subtree` at `vendor/nemoclaw/` | Provides agent lifecycle, sandbox, channels, routed inference; live-tracked for security updates |
 | Training-loop pattern | karpathy/autoresearch, frozen copy at `vendor/autoresearch/` | Loop kernel adapted to strategy mutation; not updated upstream after copy |
+| Reference patterns | tauricresearch/tradingagents, live `git subtree` at `vendor/tradingagents/` | Apache 2.0 paper-backed multi-agent trading framework (arXiv:2412.20138); monthly upstream pulls for new prompts + connectors; cherry-picked per phase, never integrated wholesale |
 | Repo layout | Single umbrella monorepo; private | Clean upstream tracking via subtree; cohesive deploy unit |
 | Database | Postgres + pgvector from day one | Single service for KB vector store, trade journal, metadata; eliminates ChromaDB and SQLite |
 | LLM routing | LiteLLM gateway in front of NemoClaw | Universal multi-provider support without per-provider code |
@@ -40,6 +41,7 @@ mahoraga/
 ├── training/                      ← Mahoraga's autoresearch loop (adapted)
 ├── vendor/
 │   ├── nemoclaw/                  ← live subtree from NVIDIA/NemoClaw (Apache 2.0)
+│   ├── tradingagents/             ← live subtree from tauricresearch/tradingagents (Apache 2.0)
 │   └── autoresearch/              ← frozen copy of karpathy/autoresearch (MIT)
 ├── infra/
 │   ├── nemoclaw-config/           ← agents.yaml, channels.yaml, routes, sandboxes, connections
@@ -64,12 +66,14 @@ Three tiers, in order of preference. Stay in Tier 1 unless you genuinely cannot.
 ## Upstream tracking
 
 - **NemoClaw**: pulled via `git subtree pull --prefix=vendor/nemoclaw <upstream> <tag> --squash`. Routine pulls monthly; security advisories pulled within 72h. Never push back upstream by accident — `git subtree push` is explicit and never run automatically.
+- **tradingagents**: pulled via `git subtree pull --prefix=vendor/tradingagents tradingagents-upstream <tag> --squash`. Routine pulls monthly; on every pull, scan upstream diff against `vendor/tradingagents/MAHORAGA_NOTES.md` modifications log. Cherry-picked modules in `services/trader/` are one-way + manual; upstream changes do not auto-propagate. Never push back upstream by accident.
 - **autoresearch**: frozen. We copy `program.md` and loop scaffolding into `training/` once; we do not pull updates. License preserved at `vendor/autoresearch/LICENSE`.
 
 ## IP & licensing posture
 
 - This repo is **private** and may become a commercial product.
 - NemoClaw is **Apache 2.0** — permits private fork, modification, commercial use. Obligations: preserve `vendor/nemoclaw/LICENSE`, document modifications in `vendor/nemoclaw/MAHORAGA_CHANGES.md`, preserve any upstream `NOTICE` file, do not use NVIDIA trademarks in product branding.
+- tradingagents is **Apache 2.0** — same posture as NemoClaw. Cherry-picked modules in `services/trader/` keep the original Apache header + a Mahoraga-attribution block citing source path + upstream SHA; recorded in `vendor/tradingagents/MAHORAGA_NOTES.md` modifications log.
 - autoresearch is **MIT** — preserve `vendor/autoresearch/LICENSE` and copyright notice. Otherwise unrestricted.
 - Never delete vendor `LICENSE` files. Never strip copyright headers from vendored code.
 
