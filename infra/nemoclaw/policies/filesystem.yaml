@@ -1,0 +1,12 @@
+# Filesystem policy — agent's home is read-only; only specific paths writable.
+# Matches NemoClaw blueprint's standard layout per nemoclaw-user-overview/ecosystem.md.
+filesystem:
+  read_only:
+    - /sandbox                                  # entire home read-only by default
+    - /sandbox/.openclaw                        # gateway config — locked
+  read_write:
+    - /sandbox/.openclaw-data                   # OpenClaw operational data
+    - /sandbox/.nemoclaw                        # NemoClaw blueprint state
+    - /tmp                                      # transient
+    - /sandbox/data/parquet                     # feature store (mount from host)
+    - /sandbox/data/audit                       # audit log (mount from host)
