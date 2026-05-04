@@ -6,6 +6,8 @@
 **Companion spec:** [`2026-04-25-nemoclaw-autoresearch-integration.md`](2026-04-25-nemoclaw-autoresearch-integration.md)
 
 > **⚠️ Substrate-layer revision (2026-04-26):** §3.2, §3.3, §5.1, and §5.6 of this spec are partially superseded by [`2026-04-26-architecture-revision-consolidated-assistant.md`](2026-04-26-architecture-revision-consolidated-assistant.md). Hunter / Guardian / Archivist are now OpenClaw subagents inside one NemoClaw-hardened sandbox, not separate always-on agent containers. Application-layer concerns (data, walls, autoresearch loop, hard risk limits) are unchanged.
+>
+> **⚠️ Memory-layer revision (2026-05-03):** §3.5 (Storage), §5.3 (Data contract), §6 Phase-3 exit criteria are partially superseded by [`2026-05-03-hindsight-memory-layer-revision.md`](2026-05-03-hindsight-memory-layer-revision.md). The planned `knowledge.*` Postgres schemas are dropped; Hindsight (vendor/hindsight/, MIT) now owns all knowledge / KB / memory storage as Experience Facts / World Facts / Observations / Mental Models. `trades.*`, `audit.events`, `strategies.*` remain in our Postgres as system-of-record.
 
 ---
 

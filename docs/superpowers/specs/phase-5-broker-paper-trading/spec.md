@@ -6,6 +6,8 @@
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
 **Predecessor:** Phase 4
 
+> **⚠️ Memory-layer revision (2026-05-03):** Trade decision *contexts* (reasoning, regime, signals, expected outcome) are retained as Experience Facts in Hindsight per [`../2026-05-03-hindsight-memory-layer-revision.md`](../2026-05-03-hindsight-memory-layer-revision.md). The trade itself (transactional state — order, fill, position, pnl) **stays in Postgres `trades.*`** because regulatory + reconciliation needs ACID + exact tabular queries. The hash-chained `audit.events` log also stays in Postgres. The split is intentional: knowledge ↔ Hindsight; system-of-record ↔ Postgres.
+
 ---
 
 ## 1. Goal

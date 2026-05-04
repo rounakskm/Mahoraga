@@ -6,6 +6,8 @@
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
 **Predecessor:** Phase 6 (convergence report passed)
 
+> **⚠️ Memory-layer revision (2026-05-03):** Live trade decision contexts retained as Experience Facts in Hindsight per [`../2026-05-03-hindsight-memory-layer-revision.md`](../2026-05-03-hindsight-memory-layer-revision.md). Operator queries via Telegram (`/why-did-we-trade-X`, `/regime`, `/strategy <id>`) flow through Hindsight `recall()` and `reflect()`. Convergence-report (Phase 6 deliverable feeding into Phase 7 readiness) leverages Hindsight `reflect()` over months of training history.
+
 ---
 
 ## 1. Goal

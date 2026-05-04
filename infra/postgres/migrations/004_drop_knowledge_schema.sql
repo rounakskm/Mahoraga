@@ -1,0 +1,21 @@
+-- Drop the unused `knowledge` schema.
+--
+-- Originally created in 002_schemas.sql for hand-coded KB Levels 1/2/3.
+-- Superseded by Hindsight (vendor/hindsight/) per
+-- docs/superpowers/specs/2026-05-03-hindsight-memory-layer-revision.md.
+--
+-- Hindsight runs in a separate Postgres instance (mahoraga-hindsight-db)
+-- and owns all knowledge / memory storage:
+--   World Facts        (news, regimes, macro signals)
+--   Experience Facts   (iteration outcomes, trade decision contexts)
+--   Observations       (auto-consolidated patterns; replaces planned L2)
+--   Mental Models      (curated meta-principles; replaces planned L3)
+--
+-- Schemas that REMAIN in this Postgres (system-of-record):
+--   trades.*           transactional ledger (orders, fills, positions)
+--   audit.events       hash-chained immutable halt + decision audit
+--   strategies.*       lifecycle pointers into git-versioned registry
+--
+-- Idempotent: CASCADE drops any tables/indexes that may have been added.
+
+DROP SCHEMA IF EXISTS knowledge CASCADE;

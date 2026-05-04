@@ -214,6 +214,7 @@ This revision is substrate-layer. The application doesn't change:
 |---|---|---|---|
 | `vendor/nemoclaw/` | live `git subtree` (monthly + 72h security pulls) | Apache 2.0 | Substrate (NemoClaw + OpenShell + OpenClaw) |
 | `vendor/tradingagents/` | live `git subtree` (monthly pulls) | Apache 2.0 | **Reference** for data fetchers + analyst prompts; cherry-picked per phase into `services/trader/`, never integrated wholesale. Substrate-portability rule (CLAUDE.md §7) keeps LangGraph/LangChain out of `services/trader/`. See [`vendor/tradingagents/MAHORAGA_NOTES.md`](../../../vendor/tradingagents/MAHORAGA_NOTES.md) for cherry-pick targets per phase + modifications log. |
+| `vendor/hindsight/` | live `git subtree` (monthly pulls) | MIT | **Memory / knowledge layer** — Experience Facts, World Facts, Observations, Mental Models. Runs as a sidecar service. Replaces planned hand-coded `knowledge.*` Postgres schemas. See [`2026-05-03-hindsight-memory-layer-revision.md`](2026-05-03-hindsight-memory-layer-revision.md) and [`vendor/hindsight/MAHORAGA_NOTES.md`](../../../vendor/hindsight/MAHORAGA_NOTES.md). |
 | `vendor/autoresearch/` | frozen one-time copy | MIT | Loop pattern reference (karpathy); adapted into `training/` (Phase 3) |
 
 The tradingagents addition (2026-04-30) does **not** change the architectural model defined in this revision — it adds a paper-validated reference repo (arXiv:2412.20138) alongside our existing vendors. Cherry-pick targets land in `services/trader/` per phase as the relevant phase begins.

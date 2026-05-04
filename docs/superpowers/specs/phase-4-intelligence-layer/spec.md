@@ -6,6 +6,8 @@
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
 **Predecessor:** Phase 3
 
+> **⚠️ Memory-layer revision (2026-05-03):** All knowledge writes from this phase land in Hindsight per [`../2026-05-03-hindsight-memory-layer-revision.md`](../2026-05-03-hindsight-memory-layer-revision.md). News-classifier writes World Facts (`{ticker, classification, sentiment, source, ts}`); web-research writes Mental Models (synthesized macro narratives) + World Facts (FRED, SEC, Fed, FedWatch). Sentiment aggregation queries Hindsight directly via `recall()`. Transition predictor's Hunter-learned layer reads Hindsight Observations. Saved work: KB news/sentiment schema + indexing + similarity retrieval.
+
 ---
 
 ## 1. Goal
