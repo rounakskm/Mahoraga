@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-required=(ANTHROPIC_API_KEY POSTGRES_PASSWORD OLLAMA_HOST OLLAMA_MODEL)
+required=(ANTHROPIC_API_KEY POSTGRES_PASSWORD OLLAMA_HOST OLLAMA_MODEL HINDSIGHT_DB_PASSWORD)
 missing=0
 for var in "${required[@]}"; do
   if [[ -z "${!var:-}" ]]; then

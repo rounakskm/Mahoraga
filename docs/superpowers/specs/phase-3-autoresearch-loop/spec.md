@@ -6,6 +6,10 @@
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md), [`../2026-04-25-nemoclaw-autoresearch-integration.md`](../2026-04-25-nemoclaw-autoresearch-integration.md)
 **Predecessor:** Phases 1 + 2
 
+> **⚠️ Amendment (2026-05-03):** §2 (sub-features), §3 (exit criteria), and §5 (timeline) of this spec are extended by [`../2026-05-03-phase-3-seven-role-amendment.md`](../2026-05-03-phase-3-seven-role-amendment.md), which decomposes the original 3-agent model (Hunter / Guardian / Archivist) into seven scoped subagent roles (Orchestrator, Planner, Researcher, Reviewer, Hunter, Guardian, Archivist+Memory-Keeper, Reporter) and adds concrete promote-pipeline / refresh-master / parse-metric tools ported from [`burtenshaw/multiautoresearch`](https://github.com/burtenshaw/multiautoresearch) (see [`vendor/multiautoresearch/MAHORAGA_NOTES.md`](../../../vendor/multiautoresearch/MAHORAGA_NOTES.md)). Architectural posture from the 2026-04-26 consolidated-assistant revision is unchanged: still one OpenClaw assistant inside one OpenShell sandbox.
+>
+> **⚠️ Memory-layer revision (2026-05-03):** §2 KB Level-1 storage + Archivist L1→L2 promotion + KB pgvector similarity search are superseded by [`../2026-05-03-hindsight-memory-layer-revision.md`](../2026-05-03-hindsight-memory-layer-revision.md). All knowledge — Experience Facts (iteration outcomes, kept and discarded both), Observations (auto-consolidated patterns; replaces planned L2), Mental Models (curated meta-principles; replaces planned L3) — lives in Hindsight bank `mahoraga-trader`. Archivist becomes a thin scheduler that triggers Hindsight `reflect()` on cadence (weekly L1→L2, monthly L2→L3). New Phase 3 sub-feature: `services/trader/tools/memory.py` wrapper around `hindsight_client`. Compressed-replay LLM cost discipline (batched retains, cadenced reflects, cheap-model entity extraction) per the revision §5. Saved work: full L1→L2 promotion algorithm + pgvector tuning + retrieval ranking (~13 person-days).
+
 ---
 
 ## 1. Goal

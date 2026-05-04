@@ -12,7 +12,7 @@ Source-of-truth project plan: [`docs/project_plan/MAHORAGA_PROJECT_PLAN.md`](doc
 
 ## Architecture in one paragraph
 
-NemoClaw (vendored at `vendor/nemoclaw/`) is the substrate — agent OS providing lifecycle, hardened sandbox, state, managed channels, and routed inference. Always-on agents (Hunter, Guardian, Archivist, plus Phase-4+ web-research) run as sibling containers under NemoClaw, alongside stateless workers (regime-detector, data-ingest, execution, training, news-classifier, synthetic-data library). LiteLLM gateway sidecar provides multi-provider LLM routing (Ollama-local Gemma 4, OpenRouter, Gemini, Anthropic, OpenAI, Grok behind one OpenAI-compatible API). Postgres + pgvector is the single application database (knowledge base, trade journal, experiment metadata, strategy registry pointers). Strategy mutations are driven by a karpathy/autoresearch-style loop, vendored once at `vendor/autoresearch/` and adapted in `training/`. Everything dockerized; `docker compose up` brings the full local stack online on Apple Silicon.
+NemoClaw (vendored at `vendor/nemoclaw/`) is the substrate — agent OS providing lifecycle, hardened sandbox, state, managed channels, and routed inference. Always-on agents (Hunter, Guardian, Archivist, plus Phase-4+ web-research) run as sibling containers under NemoClaw, alongside stateless workers (regime-detector, data-ingest, execution, training, news-classifier, synthetic-data library). LiteLLM gateway sidecar provides multi-provider LLM routing (Ollama-local Gemma 4, OpenRouter, Gemini, Anthropic, OpenAI, Grok behind one OpenAI-compatible API). **Hindsight (vendor/hindsight/) is the memory / knowledge layer** — Experience Facts, World Facts, Observations, Mental Models — running as a sidecar service with its own pgvector instance. Postgres + pgvector handles transactional state (trades, audit hash-chain, strategy registry pointers). Strategy mutations are driven by a karpathy/autoresearch-style loop, vendored once at `vendor/autoresearch/` and adapted in `training/`. Everything dockerized; `docker compose up` brings the full local stack online on Apple Silicon.
 
 ## Key architectural decisions (locked in 2026-04-25)
 
@@ -21,8 +21,10 @@ NemoClaw (vendored at `vendor/nemoclaw/`) is the substrate — agent OS providin
 | Agent substrate | NVIDIA/NemoClaw, vendored as `git subtree` at `vendor/nemoclaw/` | Provides agent lifecycle, sandbox, channels, routed inference; live-tracked for security updates |
 | Training-loop pattern | karpathy/autoresearch, frozen copy at `vendor/autoresearch/` | Loop kernel adapted to strategy mutation; not updated upstream after copy |
 | Reference patterns | tauricresearch/tradingagents, live `git subtree` at `vendor/tradingagents/` | Apache 2.0 paper-backed multi-agent trading framework (arXiv:2412.20138); monthly upstream pulls for new prompts + connectors; cherry-picked per phase, never integrated wholesale |
+| Autoresearch operator patterns | burtenshaw/multiautoresearch, frozen reference at `vendor/multiautoresearch/` (SHA `2dbc0bb`, 2026-05-03) | MIT autolab control plane on top of karpathy/autoresearch; mined for the 7-role subagent decomposition + isolated-worktree experiment isolation + atomic record-and-promote; pattern source only, never on the import path. See [`vendor/multiautoresearch/MAHORAGA_NOTES.md`](vendor/multiautoresearch/MAHORAGA_NOTES.md) and [`docs/superpowers/specs/2026-05-03-phase-3-seven-role-amendment.md`](docs/superpowers/specs/2026-05-03-phase-3-seven-role-amendment.md). |
 | Repo layout | Single umbrella monorepo; private | Clean upstream tracking via subtree; cohesive deploy unit |
-| Database | Postgres + pgvector from day one | Single service for KB vector store, trade journal, metadata; eliminates ChromaDB and SQLite |
+| Database (transactional state) | Postgres + pgvector for `trades.*`, `audit.events`, `strategies.*` | ACID + exact tabular queries for tax / reconciliation / regulatory compliance; hash-chained audit trail. Knowledge / KB layer moved to Hindsight (next row). |
+| Memory / KB layer | vectorize-io/hindsight, live `git subtree` at `vendor/hindsight/` (MIT, v0.5.6+) | Replaces planned hand-coded `knowledge.*` schemas. State-of-the-art on LongMemEval; PostgreSQL + pgvector backend; first-party NemoClaw integration. All Experience Facts (iteration outcomes, trade contexts), World Facts (news, regimes, macro), Observations (auto-consolidated patterns), Mental Models (curated principles) live here. See [`docs/superpowers/specs/2026-05-03-hindsight-memory-layer-revision.md`](docs/superpowers/specs/2026-05-03-hindsight-memory-layer-revision.md). |
 | LLM routing | LiteLLM gateway in front of NemoClaw | Universal multi-provider support without per-provider code |
 | Runtime | Docker everywhere — local dev and future cloud | Same artifact runs locally and in cloud |
 | Local target | Apple Silicon MacBook via Colima or Docker Desktop | NemoClaw supports macOS Apple Silicon (no NVIDIA GPU required) |
@@ -42,7 +44,9 @@ mahoraga/
 ├── vendor/
 │   ├── nemoclaw/                  ← live subtree from NVIDIA/NemoClaw (Apache 2.0)
 │   ├── tradingagents/             ← live subtree from tauricresearch/tradingagents (Apache 2.0)
-│   └── autoresearch/              ← frozen copy of karpathy/autoresearch (MIT)
+│   ├── hindsight/                 ← live subtree from vectorize-io/hindsight (MIT) — memory layer
+│   ├── autoresearch/              ← frozen copy of karpathy/autoresearch (MIT)
+│   └── multiautoresearch/         ← frozen reference snapshot of burtenshaw/multiautoresearch (MIT)
 ├── infra/
 │   ├── nemoclaw-config/           ← agents.yaml, channels.yaml, routes, sandboxes, connections
 │   └── compose/                   ← service Dockerfiles
@@ -67,14 +71,18 @@ Three tiers, in order of preference. Stay in Tier 1 unless you genuinely cannot.
 
 - **NemoClaw**: pulled via `git subtree pull --prefix=vendor/nemoclaw <upstream> <tag> --squash`. Routine pulls monthly; security advisories pulled within 72h. Never push back upstream by accident — `git subtree push` is explicit and never run automatically.
 - **tradingagents**: pulled via `git subtree pull --prefix=vendor/tradingagents tradingagents-upstream <tag> --squash`. Routine pulls monthly; on every pull, scan upstream diff against `vendor/tradingagents/MAHORAGA_NOTES.md` modifications log. Cherry-picked modules in `services/trader/` are one-way + manual; upstream changes do not auto-propagate. Never push back upstream by accident.
+- **hindsight**: pulled via `git subtree pull --prefix=vendor/hindsight hindsight-upstream <tag> --squash`. Routine pulls monthly. We use Hindsight as a service, not as a code library — no source-level cherry-picks expected. API breaking changes between versions tracked via integration-smoke; only advance the pin after smoke passes. Never push back upstream by accident.
 - **autoresearch**: frozen. We copy `program.md` and loop scaffolding into `training/` once; we do not pull updates. License preserved at `vendor/autoresearch/LICENSE`.
+- **multiautoresearch**: frozen reference snapshot, NOT subtree. Pinned at SHA `2dbc0bb593a1fc07997f35b3ef3aaebd1e3e561f` (2026-05-03). Refresh policy is quarterly-at-most via manual rsync (see `vendor/multiautoresearch/MAHORAGA_NOTES.md` "Vendoring discipline"). Never imported on the path; ports into `services/trader/` and `infra/openclaw/subagents/` are one-way + manual + tracked in the Port log.
 
 ## IP & licensing posture
 
 - This repo is **private** and may become a commercial product.
 - NemoClaw is **Apache 2.0** — permits private fork, modification, commercial use. Obligations: preserve `vendor/nemoclaw/LICENSE`, document modifications in `vendor/nemoclaw/MAHORAGA_CHANGES.md`, preserve any upstream `NOTICE` file, do not use NVIDIA trademarks in product branding.
 - tradingagents is **Apache 2.0** — same posture as NemoClaw. Cherry-picked modules in `services/trader/` keep the original Apache header + a Mahoraga-attribution block citing source path + upstream SHA; recorded in `vendor/tradingagents/MAHORAGA_NOTES.md` modifications log.
+- hindsight is **MIT** (Copyright Vectorize AI, Inc.) — preserve `vendor/hindsight/LICENSE`. We use Hindsight as a service, not as a code library; if we ever extract source files, attribution discipline applies.
 - autoresearch is **MIT** — preserve `vendor/autoresearch/LICENSE` and copyright notice. Otherwise unrestricted.
+- multiautoresearch is **MIT** — license file present only at `pre-training/LICENSE` © 2026 Ben Burtenshaw; `post-training/` and `inference/` subprojects ship no inline LICENSE at the pinned SHA. Treat the whole repo as MIT-by-implication for `pre-training/` paths only; before porting from `post-training/` or `inference/`, confirm license scope. Ports keep the MIT header + Mahoraga-attribution block; recorded in `vendor/multiautoresearch/MAHORAGA_NOTES.md` Port log.
 - Never delete vendor `LICENSE` files. Never strip copyright headers from vendored code.
 
 ## Critical sequencing rule (do not violate)
@@ -112,6 +120,7 @@ These come from the project plan and must be enforced at the execution boundary,
 | How are NemoClaw and autoresearch wired in? | `docs/superpowers/specs/2026-04-25-nemoclaw-autoresearch-integration.md` |
 | What phase are we in? | The most recent commit on `main` plus the spec catalog in the architecture spec |
 | What's allowed to change in `vendor/`? | The "How to extend NemoClaw" section above |
+| Where does memory / KB live? | Hindsight (`vendor/hindsight/`); see [`docs/superpowers/specs/2026-05-03-hindsight-memory-layer-revision.md`](docs/superpowers/specs/2026-05-03-hindsight-memory-layer-revision.md). All knowledge in Hindsight bank `mahoraga-trader`; trades + audit + strategy registry stay in Postgres. |
 
 ## Practices to follow
 
