@@ -11,6 +11,8 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: postgres
+      # PGDATA in a subdir so initdb doesn't trip over `.gitkeep` at the mount root
+      PGDATA: /var/lib/postgresql/data/pgdata
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -45,6 +47,8 @@ services:
       POSTGRES_PASSWORD: ${HINDSIGHT_DB_PASSWORD}
       POSTGRES_DB: hindsight
       POSTGRES_USER: hindsight
+      # PGDATA in a subdir so initdb doesn't trip over `.gitkeep` at the mount root
+      PGDATA: /var/lib/postgresql/data/pgdata
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hindsight"]
       interval: 5s

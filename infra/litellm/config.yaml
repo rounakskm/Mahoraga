@@ -1,11 +1,16 @@
 model_list:
-  # Local primary — alias `ollama/gemma4`; actual tag picked from OLLAMA_MODEL env
-  # (gemma4:26b default; gemma4:e4b fallback — switched in .env per T1.5)
+  # Local primary — Ollama on host (Metal-accelerated, free).
+  # NOTE: api_base is hardcoded because LiteLLM's YAML loader doesn't support
+  # shell-style ${VAR:-default} substitution. To switch the Ollama tag, edit
+  # the `model:` line below (or set the OLLAMA_MODEL_FULL env var and use
+  # `os.environ/OLLAMA_MODEL_FULL` here — but ensure the var is also added
+  # to the litellm service `environment:` block in docker-compose.yml).
   - model_name: ollama/gemma4
     litellm_params:
-      model: ollama/${OLLAMA_MODEL}
-      api_base: ${OLLAMA_HOST:-http://host.docker.internal:11434}
-  # Cloud fallback — Anthropic
+      model: ollama/gemma4:e4b
+      api_base: http://host.docker.internal:11434
+
+  # Cloud fallback — Anthropic. Only used when ANTHROPIC_API_KEY is real.
   - model_name: anthropic/claude-opus-4-7
     litellm_params:
       model: anthropic/claude-opus-4-7
@@ -14,8 +19,9 @@ model_list:
 litellm_settings:
   drop_params: true
   set_verbose: false
-  fallbacks:
-    - "ollama/gemma4": ["anthropic/claude-opus-4-7"]
+  # No automatic fallback chain — Phase 0 may run with an Anthropic placeholder
+  # key, in which case fallback to Anthropic on Ollama failure would cascade
+  # into an auth error. Callers explicitly pick the model.
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
