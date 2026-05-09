@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mahoraga.trader/contracts/researcher.schema.json",
+  "title": "Generic researcher leaf-worker output (target + comps + precedents)",
+  "description": "Adapted from anthropics/financial-services @ 1c2ece3467c3434ddd01e655970e35b773940a29 — managed-agent-cookbooks/pitch-agent/subagents/researcher.yaml. Apache 2.0 (preserved). Adapted 2026-05-09 for Mahoraga: this is the most polished leaf-worker schema in the source repo. We keep the (target, comps[], precedents[]) shape as a generic template for any Researcher role-as-tool that has to return ranked tabular findings with an optional reference set. CapIQ/Daloopa MCP wiring stripped; data sources are caller-injected.",
+  "type": "object",
+  "required": ["target", "comps"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9 ._-]+$" },
+    "comps": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ticker": { "type": "string", "maxLength": 12, "pattern": "^[A-Z.]+$" },
+          "metric": { "type": "string", "maxLength": 32, "pattern": "^[A-Za-z0-9 /_-]+$" },
+          "value":  { "type": "number" }
+        }
+      }
+    },
+    "precedents": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target":   { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9 ._-]+$" },
+          "acquirer": { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9 ._-]+$" },
+          "ev":       { "type": "number" },
+          "multiple": { "type": "number" }
+        }
+      }
+    }
+  }
+}

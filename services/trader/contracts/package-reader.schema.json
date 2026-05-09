@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mahoraga.trader/contracts/package-reader.schema.json",
+  "title": "Reviewer-flag pattern (item + reported value + method enum)",
+  "description": "Adapted from anthropics/financial-services @ 1c2ece3467c3434ddd01e655970e35b773940a29 — managed-agent-cookbooks/valuation-reviewer/subagents/package-reader.yaml. Apache 2.0 (preserved). Adapted 2026-05-09 for Mahoraga: the upstream YAML targets PE-fund LP-reporting (portcos + as-of date + method enum). We re-target the same shape to autoresearch loop strategy reviews — each `item` is a strategy version, `reported_fv` is its reported sharpe/return/etc., and `method` enumerates how the score was produced. The `enum`-bounded method field is the load-bearing pattern: it forces the reviewer leaf-worker to pick from a closed set of valuation methodologies, which downstream code can switch on safely.",
+  "type": "object",
+  "required": ["fund", "as_of", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "fund":  { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9 ._-]+$" },
+    "as_of": { "type": "string", "maxLength": 10, "pattern": "^[0-9-]+$" },
+    "items": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item_id":     { "type": "string", "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$" },
+          "reported_fv": { "type": "number" },
+          "method":      { "enum": ["market_multiple", "dcf", "recent_round", "cost", "backtest", "walk_forward", "monte_carlo", "other"] }
+        }
+      }
+    }
+  }
+}

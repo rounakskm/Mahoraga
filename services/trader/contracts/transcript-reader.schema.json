@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mahoraga.trader/contracts/transcript-reader.schema.json",
+  "title": "Earnings transcript reader output",
+  "description": "Adapted from anthropics/financial-services @ 1c2ece3467c3434ddd01e655970e35b773940a29 — managed-agent-cookbooks/earnings-reviewer/subagents/transcript-reader.yaml. Apache 2.0 (preserved). Adapted 2026-05-09 for Mahoraga roles-as-tools: lifted the JSON schema verbatim so a Researcher leaf-worker that ingests an UNTRUSTED transcript or 8-K returns only schema-validated structured output. Pattern-bounded strings make prompt injection of control characters impossible.",
+  "type": "object",
+  "required": ["ticker", "period", "actuals"],
+  "additionalProperties": false,
+  "properties": {
+    "ticker": { "type": "string", "maxLength": 12, "pattern": "^[A-Z.]+$" },
+    "period": { "type": "string", "maxLength": 16, "pattern": "^[A-Za-z0-9_-]+$" },
+    "actuals": {
+      "type": "object",
+      "description": "Reported numeric metrics keyed by metric name (e.g. revenue, gross_margin, eps)",
+      "additionalProperties": { "type": "number" }
+    },
+    "guidance_notes": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9 .,%$()_/:-]+$" }
+    }
+  }
+}

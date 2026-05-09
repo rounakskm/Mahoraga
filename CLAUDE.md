@@ -46,7 +46,8 @@ mahoraga/
 │   ├── tradingagents/             ← live subtree from tauricresearch/tradingagents (Apache 2.0)
 │   ├── hindsight/                 ← live subtree from vectorize-io/hindsight (MIT) — memory layer
 │   ├── autoresearch/              ← frozen copy of karpathy/autoresearch (MIT)
-│   └── multiautoresearch/         ← frozen reference snapshot of burtenshaw/multiautoresearch (MIT)
+│   ├── multiautoresearch/         ← frozen reference snapshot of burtenshaw/multiautoresearch (MIT)
+│   └── _external_refs/            ← port logs for cherry-picks that are NOT subtrees (anthropics/financial-services, …)
 ├── infra/
 │   ├── nemoclaw-config/           ← agents.yaml, channels.yaml, routes, sandboxes, connections
 │   └── compose/                   ← service Dockerfiles
@@ -74,6 +75,7 @@ Three tiers, in order of preference. Stay in Tier 1 unless you genuinely cannot.
 - **hindsight**: pulled via `git subtree pull --prefix=vendor/hindsight hindsight-upstream <tag> --squash`. Routine pulls monthly. We use Hindsight as a service, not as a code library — no source-level cherry-picks expected. API breaking changes between versions tracked via integration-smoke; only advance the pin after smoke passes. Never push back upstream by accident.
 - **autoresearch**: frozen. We copy `program.md` and loop scaffolding into `training/` once; we do not pull updates. License preserved at `vendor/autoresearch/LICENSE`.
 - **multiautoresearch**: frozen reference snapshot, NOT subtree. Pinned at SHA `2dbc0bb593a1fc07997f35b3ef3aaebd1e3e561f` (2026-05-03). Refresh policy is quarterly-at-most via manual rsync (see `vendor/multiautoresearch/MAHORAGA_NOTES.md` "Vendoring discipline"). Never imported on the path; ports into `services/trader/` and `infra/openclaw/subagents/` are one-way + manual + tracked in the Port log.
+- **External-reference cherry-picks** (no subtree): cherry-picks from upstreams we explicitly chose not to vendor live are tracked under `vendor/_external_refs/<repo>-NOTES.md`. Currently: `anthropics/financial-services` (analyst skill marketplace, Apache 2.0). Each port log records source SHA + per-file source path + adaptation summary; refresh is manual, never automatic. The original analysis explaining why each external ref is cherry-pick-only (rather than subtree) lives in the same file.
 
 ## IP & licensing posture
 
