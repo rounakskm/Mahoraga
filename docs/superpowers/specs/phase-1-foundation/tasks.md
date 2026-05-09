@@ -82,19 +82,21 @@ Critical path. Unblocks every other sub-feature. **All five chunks merged 2026-0
 - [x] **P1.1.D coverage + audit + ingest orchestrator** [code+test] — NYSE-trading-calendar-aware coverage monitor; hash-chained Postgres audit logger + manifest-parquet writer; `Ingest` orchestrator with FRESH/BACKFILL modes; pure-unit + Postgres-integration tests.  (PR #12)
 - [x] **P1.1.E end-to-end integration test + CI** [test+infra] — `tests/integration/phase-1/data_foundation/test_end_to_end.py` round-trips yfinance + FRED through the full path with mocked HTTP + real Postgres; CI workflow runs it in `integration-smoke`.  (PR #13, this PR)
 
-### P1.2 — `universe-spec.md` (sub-feature 2)
+### P1.2 — `universe-spec.md` (sub-feature 2) — **CLOSED 2026-05-09**
 
-- [ ] **P1.2.spec [plan]** Author `universe-spec.md` covering S&P 500 + Russell 1000 PIT constituents from SEC EDGAR; ETF allowlist YAML schema; index-reconstitution event log. → P1.1.spec
-- [ ] **P1.2.plan + tasks [plan]** Companion plan + tasks files. → P1.2.spec
-- [ ] **P1.2.code [code]** Implement universe service; reproduce a known historical index level as audit. → P1.1.code.skeleton + P1.2.plan
-- [ ] **P1.2.test [test]** Index-level reproduction test in CI. → P1.2.code
+- [x] **P1.2.spec [plan]** Authored at `phase-1-foundation/universe-spec.md` (PR #14). Pivoted from the parent spec's "EDGAR" framing to a Wikipedia + FTSE Russell PR bootstrap with hand-curated YAML at runtime.
+- [x] **P1.2.plan + tasks [plan]** Bundled in `universe-and-vault-plan.md` + `universe-and-vault-tasks.md` (PR #14).
+- [x] **P1.2.A YAML schema + loader** [code+test] — `Universe.load()` API, schema validators, 18 tests, hand-curated S&P 500 + Russell 1000 + ETF YAML bootstrap. (PR #16)
+- [x] **P1.2.B bootstrap parsers + script + manifest** [code+test] — `services/trader/universe/bootstrap.py` parsers, `scripts/build_sp500_universe.py`, `RebuildManifestWriter`, 17 tests. Russell 1000 deferred to a follow-up. (PR #19)
+- [x] **P1.2.C index-reproduction audit** [test+doc] — `services/trader/universe/index_replay.py` mechanism + CI-runnable synthetic test + opt-in (`MAHORAGA_LIVE_AUDIT=1`) live audit at `tests/integration/phase-1/universe/test_index_reproduction.py`. (PR #20, this PR)
 
-### P1.3 — `vault-embargo-spec.md` (sub-feature 3) ‖ P1.2
+### P1.3 — `vault-embargo-spec.md` (sub-feature 3) — **CLOSED 2026-05-09**
 
-- [ ] **P1.3.spec [plan]** Author `vault-embargo-spec.md`: storage-layer guard, `vault_override` flag with audit warning, deliberate-leak canary test design. → P1.1.spec
-- [ ] **P1.3.plan + tasks [plan]** → P1.3.spec
-- [ ] **P1.3.code [code]** Implement guard inside the storage adapter so the protection is impossible to bypass without the explicit override. → P1.1.code.parquet + P1.3.plan
-- [ ] **P1.3.test [test]** Canary leak test runs in CI; deliberate-leak fixture verifies hard rejection without override. → P1.3.code
+- [x] **P1.3.spec [plan]** Authored at `phase-1-foundation/vault-embargo-spec.md`; bundled with universe-spec in PR #14.
+- [x] **P1.3.plan + tasks [plan]** Bundled in `universe-and-vault-{plan,tasks}.md` (PR #14).
+- [x] **P1.3.A storage hook + canary** [code+test] — `VaultEmbargoError`, `assess_vault()`, `ParquetAdapter` `vault_cutoff_days` + `vault_override` kwargs, 12 tests. (PR #15)
+- [x] **P1.3.B audit-writer wire-up** [code+test] — required `vault_override_reason`, hash-chained audit row, 12 new tests + Postgres integration. (PR #17)
+- [x] **P1.3.C default flip + sweep** [code+test+doc] — `vault_cutoff_days` defaults to 180; existing tests opt out explicitly where appropriate. (PR #18)
 
 ### P1.4 — `feature-pipeline-spec.md` (sub-feature 4) ‖ P1.5
 
