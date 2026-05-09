@@ -68,8 +68,8 @@ The loader rejects malformed YAML at startup:
 | Chunk | Branch | Status |
 |---|---|---|
 | U1. YAML schema + loader | `phase-1-universe-yaml-and-loader` | Merged |
-| U2. Bootstrap scripts (Wikipedia) | `phase-1-universe-bootstrap-scripts` | **In review (this PR)** |
-| U3. Index-reproduction audit test | `phase-1-universe-index-reproduction` | Planned |
+| U2. Bootstrap scripts (Wikipedia) | `phase-1-universe-bootstrap-scripts` | Merged |
+| U3. Index-reproduction audit | `phase-1-universe-index-reproduction` | **In review (this PR)** |
 
 ## Operator runbook (chunk U2)
 
@@ -104,6 +104,53 @@ FTSE Russell publishes annual reconstitution PRs in June each year, but
 the Wikipedia Russell 1000 article doesn't carry a clean changes table.
 For Phase 1, Russell 1000 stays on the small hand-curated YAML committed
 in U1; a future sub-feature will scrape FTSE Russell directly.
+
+## Index-reproduction audit (chunk U3)
+
+**The load-bearing acceptance test for P1.2.** The mechanism: pull
+`Universe.members(name="sp500", asof=last_day_of_month)` for a target
+month, look up OHLCV for those tickers via the Phase 1 `ParquetAdapter`,
+and compute the equal-weighted price return. A green audit means the
+universe + OHLCV layers are aligned — the most common backtest failure
+mode (silent survivorship bias) is caught by the comparison.
+
+Two tests exercise this:
+
+1. **`services/trader/universe/tests/test_index_replay.py`** — runs in CI.
+   Synthetic 3-ticker universe with hand-computed +10%/+5%/-5% monthly
+   moves; asserts the equal-weighted return is exactly `(0.10+0.05-0.05)/3
+   = +3.33%`. Catches mechanism bugs without needing live HTTP.
+
+2. **`tests/integration/phase-1/universe/test_index_reproduction.py`** —
+   operator-run, **opt-in via `MAHORAGA_LIVE_AUDIT=1`**. Reads the
+   operator-populated S&P 500 YAML + the operator-populated `data/parquet/
+   ohlcv/` files for July 2018. Asserts the equal-weighted return lands
+   inside a generous sanity range (currently `[-5%, +10%]`) and that
+   ≥100 of the ~500 constituents have OHLCV — gross misses indicate
+   the operator hasn't fully run the ingest.
+
+Operator runbook for the live audit:
+
+```bash
+# 1. Populate the full S&P 500 history
+python scripts/build_sp500_universe.py
+
+# 2. Ingest yfinance OHLCV for the audited month (the Phase 1 ingest
+#    orchestrator handles this; this is a placeholder until the trader
+#    service ships an end-to-end CLI)
+python -m services.trader.data.ingest \
+    --start 2018-07-01 --end 2018-07-31 \
+    --tickers $(yq '.members | join(" ")' data/universe/sp500/seed.yaml)
+
+# 3. Run the live audit
+MAHORAGA_LIVE_AUDIT=1 pytest tests/integration/phase-1/universe -v
+```
+
+The reference number for July 2018 is loose by design — the goal is
+"did we reconstruct the index correctly?" not "match a vendor's number
+exactly". If the audit fails, the fastest debugging step is comparing
+the per-ticker `report.constituent_returns` dict against an external
+data source for a handful of names.
 
 ## What U1 ships vs U2
 
