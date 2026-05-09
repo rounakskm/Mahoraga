@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+# Russell 1000 events (chunk U1 bootstrap; full reconstitution history in chunk U2).
+name: russell1000
+events: []

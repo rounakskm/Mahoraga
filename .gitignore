@@ -222,6 +222,11 @@ __marimo__/
 data/**
 !data/**/.gitkeep
 !data/.gitkeep
+# Phase 1 universe YAML files are hand-curated source, not generated data.
+!data/universe/
+!data/universe/**
+data/universe/manifests/**
+!data/universe/manifests/.gitkeep
 .env
 *.pyc
 __pycache__/

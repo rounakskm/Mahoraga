@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+# S&P 500 add/remove events covering the 2014–2018 chunk-U1 bootstrap.
+# Full history lands in chunk U2.
+name: sp500
+events:
+  # 2014: Visa is in S&P 100 already; this entry is just a typed example
+  # of the schema. Real events come from Wikipedia's "Selected changes" table.
+  - date: 2014-09-19
+    ticker: BABA
+    action: add
+    note: "IPO; entered S&P 500 shortly after"
+  - date: 2018-06-26
+    ticker: GE
+    action: remove
+    note: "Removed from S&P 500 after underperformance; replaced by WBA"
+  - date: 2018-06-26
+    ticker: WBA
+    action: add
+    note: "Walgreens Boots Alliance replaced GE"
