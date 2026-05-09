@@ -17,6 +17,17 @@ test = [
     "respx>=0.21",  # httpx test fixtures (used in chunk 1+ tests)
 ]
 
+# Mahoraga is a multi-tree repo (docs/, data/, infra/, services/, tests/, vendor/).
+# Tell setuptools to only treat the `services` tree as installable Python; everything
+# else (vendored upstreams, fixtures, specs) stays out of the wheel.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["services*"]
+exclude = ["services*.tests*"]
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"
