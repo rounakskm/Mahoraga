@@ -17,25 +17,62 @@ Design docs (read these first):
 ```
 services/trader/data/
 ├── connectors/
-│   ├── base.py        Connector ABC + RateLimiter + ConnectorResult + errors
-│   ├── yfinance.py    daily OHLCV for equities + ETFs (chunk 1, this PR)
-│   ├── fred.py        macro indicators with as_of_release_date (chunk 3, planned)
-│   └── tests/         pytest fixtures
-├── storage/           parquet adapter + PIT view (chunk 2, planned)
-├── coverage.py        per-symbol completeness (chunk 4, planned)
-├── audit.py           audit-log + manifest writes (chunk 4, planned)
-└── ingest.py          orchestrator (chunk 4, planned)
+│   ├── base.py             Connector ABC + RateLimiter + ConnectorResult + errors
+│   ├── yfinance.py         daily OHLCV for equities + ETFs
+│   ├── fred.py             macro indicators with as_of_release_date (chunk 3, planned)
+│   └── tests/              pytest fixtures
+├── storage/
+│   ├── schema.py           OhlcvRow / MacroRow + PyArrow schemas
+│   ├── parquet_adapter.py  ParquetAdapter (write/read/list_partitions/gaps/health)
+│   ├── pit.py              pit_view_ohlcv / pit_view_macro
+│   └── tests/              round-trip + PIT correctness + append-only suites
+├── coverage.py             per-symbol completeness (chunk 4, planned)
+├── audit.py                audit-log + manifest writes (chunk 4, planned)
+└── ingest.py               orchestrator (chunk 4, planned)
 ```
 
 ## Status
 
 | Chunk | Branch | Status |
 |---|---|---|
-| 1. Connector skeleton + yfinance | `phase-1-data-foundation-connectors` | **In review (this PR)** |
-| 2. Parquet writer + PIT view | `phase-1-data-foundation-storage` | Planned |
+| 1. Connector skeleton + yfinance | `phase-1-data-foundation-connectors` | Merged |
+| 2. Parquet writer + PIT view | `phase-1-data-foundation-storage` | **In review (this PR)** |
 | 3. FRED connector + macro schema | `phase-1-data-foundation-fred` | Planned |
 | 4. Coverage + audit-log integration | `phase-1-data-foundation-coverage` | Planned |
 | 5. End-to-end integration test + CI | `phase-1-data-foundation-integration` | Planned |
+
+## Storage adapter API (chunk 2)
+
+The parquet adapter is the **single chokepoint** that prevents look-ahead bias.
+Every read returns only data that was publicly available at the caller-supplied
+`asof` timestamp:
+
+```python
+from datetime import UTC, datetime
+from services.trader.data.storage import ParquetAdapter
+
+adapter = ParquetAdapter("data/parquet")
+
+# Append-only write — duplicates are deduped on natural key, restatements
+# coexist as new rows with non-null `revision_at` (OHLCV) or later
+# `as_of_release_date` (macro).
+adapter.write(connector_result, kind="ohlcv")
+
+# PIT-correct read — only rows public at `asof` are returned. For OHLCV, the
+# latest revision_at <= asof wins per (ticker, bar_timestamp). For macro, the
+# latest as_of_release_date <= asof wins per (indicator, reference_date, source);
+# multiple sources for the same indicator+reference_date are all returned so the
+# joiner downstream can apply the conservative-release-date rule.
+df = adapter.read(
+    kind="ohlcv",
+    keys=["SPY", "QQQ"],
+    start=datetime(2026, 1, 1, tzinfo=UTC),
+    end=datetime(2026, 12, 31, tzinfo=UTC),
+    asof=datetime(2026, 6, 30, tzinfo=UTC),
+)
+```
+
+See `data-foundation-spec.md` §6 (storage layout) and §7 (PIT contract).
 
 ## Running the connector tests
 
