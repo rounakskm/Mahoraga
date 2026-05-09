@@ -1,13 +1,16 @@
 model_list:
-  # Local primary — Ollama on host (Metal-accelerated, free).
+  # Local primary — Ollama on host (CPU-only on Apple Silicon).
+  # NOTE: We route to a derived `gemma4-cpu:e4b` model that has `num_gpu 0`
+  # baked into the Modelfile. Reason: Ollama 0.20.5's bundled ggml hits a
+  # Metal-backend abort on Gemma-4's `per_layer_token_embd.weight` tensor
+  # (per llama.cpp PR #17869). Until Ollama ships a build with that fix,
+  # CPU inference is the working path. Recreate the alias with:
+  #   printf 'FROM gemma4:e4b\nPARAMETER num_gpu 0\n' | ollama create gemma4-cpu:e4b -f -
   # NOTE: api_base is hardcoded because LiteLLM's YAML loader doesn't support
-  # shell-style ${VAR:-default} substitution. To switch the Ollama tag, edit
-  # the `model:` line below (or set the OLLAMA_MODEL_FULL env var and use
-  # `os.environ/OLLAMA_MODEL_FULL` here — but ensure the var is also added
-  # to the litellm service `environment:` block in docker-compose.yml).
+  # shell-style ${VAR:-default} substitution.
   - model_name: ollama/gemma4
     litellm_params:
-      model: ollama/gemma4:e4b
+      model: ollama/gemma4-cpu:e4b
       api_base: http://host.docker.internal:11434
 
   # Cloud fallback — Anthropic. Only used when ANTHROPIC_API_KEY is real.
