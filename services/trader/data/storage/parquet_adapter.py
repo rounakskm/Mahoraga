@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -26,6 +26,7 @@ from services.trader.data.storage.schema import (
     natural_key_for,
     schema_for,
 )
+from services.trader.data.storage.vault import VaultEmbargoError, assess_vault
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,29 @@ class ParquetAdapter:
     re-runs and lets restatements coexist with originals.
     """
 
-    def __init__(self, root: Path | str) -> None:
+    def __init__(
+        self,
+        root: Path | str,
+        *,
+        vault_cutoff_days: int | None = None,
+    ) -> None:
+        """Construct an adapter rooted at `root`.
+
+        `vault_cutoff_days` enables vault-embargo enforcement on every read:
+        when set, any `read()` whose `[start, end]` overlaps the most-recent
+        `vault_cutoff_days` days (relative to the call's `asof`) raises
+        `VaultEmbargoError`. Pass `vault_override=True` on the call site to
+        bypass with a `WARNING` log.
+
+        Default is `None` (no vault enforcement) for backwards-compatibility
+        with the P1.1 chunks already on main; the default flips to `180` in
+        a follow-up PR (chunk V3) once existing tests are updated.
+        """
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        if vault_cutoff_days is not None and vault_cutoff_days < 0:
+            raise ValueError(f"vault_cutoff_days must be >= 0, got {vault_cutoff_days}")
+        self.vault_cutoff_days = vault_cutoff_days
 
     # --- public ----------------------------------------------------------
 
@@ -77,8 +98,17 @@ class ParquetAdapter:
         start: datetime,
         end: datetime,
         asof: datetime | None = None,
+        vault_override: bool = False,
     ) -> pd.DataFrame:
-        """Return a PIT-correct DataFrame for the requested keys + window."""
+        """Return a PIT-correct DataFrame for the requested keys + window.
+
+        Vault enforcement: if the adapter was constructed with
+        `vault_cutoff_days`, this method raises `VaultEmbargoError` when
+        `[start, end]` overlaps the vault relative to `asof`. Pass
+        `vault_override=True` to bypass with a `WARNING` log line.
+        """
+        self._enforce_vault(start=start, end=end, asof=asof, vault_override=vault_override)
+
         keys_list = list(keys)
         frames: list[pd.DataFrame] = []
         for key in keys_list:
@@ -96,6 +126,44 @@ class ParquetAdapter:
         if kind == "ohlcv":
             return pit_view_ohlcv(combined, start=start, end=end, asof=asof)
         return pit_view_macro(combined, start=start, end=end, asof=asof)
+
+    # --- vault gate ------------------------------------------------------
+
+    def _enforce_vault(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        asof: datetime | None,
+        vault_override: bool,
+    ) -> None:
+        asof_resolved = asof or datetime.now(UTC)
+        decision = assess_vault(
+            start=start,
+            end=end,
+            asof=asof_resolved,
+            vault_cutoff_days=self.vault_cutoff_days,
+        )
+        if not decision.enforced or not decision.overlaps_vault:
+            return
+        if vault_override:
+            logger.warning(
+                "vault_override=True: requested window [%s, %s] overlaps vault "
+                "(cutoff %s, asof %s). Override path active; audit row written by "
+                "wired audit_writer if present (chunk V2).",
+                start.isoformat(),
+                end.isoformat(),
+                decision.cutoff_dt.isoformat() if decision.cutoff_dt else "<n/a>",
+                asof_resolved.isoformat(),
+            )
+            return
+        assert decision.cutoff_dt is not None  # narrowed by `enforced=True`
+        raise VaultEmbargoError(
+            start=start,
+            end=end,
+            asof=asof_resolved,
+            vault_cutoff=decision.cutoff_dt,
+        )
 
     def list_partitions(self, *, kind: Kind, key: str) -> list[Path]:
         """List partition files on disk for a given key, ordered by name."""
