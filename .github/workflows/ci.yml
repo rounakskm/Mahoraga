@@ -56,10 +56,18 @@ jobs:
           timeout 60 bash -c 'until docker compose ps postgres | grep -q "healthy"; do sleep 2; done'
       - name: Install project + test deps
         run: pip install -e ".[test]"
-      - name: Run Postgres migration smoke test
+      - name: Run Phase 0 Postgres migration smoke test
         run: |
           MAHORAGA_TEST_DSN="postgresql://postgres:ci_password@localhost:5432/postgres" \
             pytest tests/integration/phase-0/test_postgres_migrations.py -v
+      - name: Run Phase 1 data-foundation Postgres-backed integration tests
+        run: |
+          MAHORAGA_TEST_DSN="postgresql://postgres:ci_password@localhost:5432/postgres" \
+            pytest tests/integration/phase-1/data_foundation -v
+      - name: Run Phase 1 audit-logger Postgres integration test
+        run: |
+          MAHORAGA_TEST_DSN="postgresql://postgres:ci_password@localhost:5432/postgres" \
+            pytest services/trader/data/tests/test_audit.py -v -m integration
       - name: Tear down
         if: always()
         run: docker compose down -v

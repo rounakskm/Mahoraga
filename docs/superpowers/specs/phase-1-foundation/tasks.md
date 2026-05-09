@@ -60,13 +60,13 @@ This file enumerates Phase 1 work items as a dependency graph so independent ite
 - [x] **P1.0.1 [plan]** Resolve spec §8 open questions; record in spec.md (BTC deferral, macro PIT, sentiment placeholder).
 - [x] **P1.0.2 [plan]** Write `plan.md` capturing 6 sub-features, sequencing, exit criteria.
 - [x] **P1.0.3 [plan]** Write this `tasks.md`.
-- [ ] **P1.0.4 [doc]** Open PR titled "Phase 1 foundation plan + tasks" referencing this directory; merge after review.
+- [x] **P1.0.4 [doc]** Open PR titled "Phase 1 foundation plan + tasks" referencing this directory; merge after review.  (PR #7, merged 2026-05-09)
 
 ### P1.1 — `data-foundation-spec.md` (sub-feature 1)
 
-Critical path. Unblocks every other sub-feature.
+Critical path. Unblocks every other sub-feature. **All five chunks merged 2026-05-09 (PRs #8, #9, #10, #11, #12, #13).**
 
-- [ ] **P1.1.spec [plan]** Author `data-foundation-spec.md` covering:
+- [x] **P1.1.spec [plan]** Author `data-foundation-spec.md` covering:
   - Connector inventory (yfinance, finnhub, FRED, BLS, TreasuryDirect, CBOE indices) with rate-limit + fallback strategy
   - Parquet layout (`data/parquet/ohlcv/{symbol}/{year}.parquet`, `data/parquet/macro/{indicator}/{year}.parquet`)
   - PIT discipline contract (every macro row carries `as_of_release_date` and `reference_date`)
@@ -74,11 +74,13 @@ Critical path. Unblocks every other sub-feature.
   - Free-tier rate-limit + backoff + partial-coverage fail-loud behavior
   - Multi-source PIT consistency rule (use the conservative latest `release_date` when joining series across providers)
   → P1.0
-- [ ] **P1.1.plan [plan]** Author `data-foundation-plan.md` (per-task breakdown, ordering, owner streams). → P1.1.spec
-- [ ] **P1.1.tasks [plan]** Author `data-foundation-tasks.md` with PR-sized chunks. → P1.1.plan
-- [ ] **P1.1.code.skeleton [code]** Implement `services/trader/data/` connector skeleton; first connector wires (yfinance + FRED). → P1.1.plan
-- [ ] **P1.1.code.parquet [code]** Implement parquet writers + reader with PIT-correct view. → P1.1.code.skeleton
-- [ ] **P1.1.test [test]** Round-trip ingest tests + PIT discipline test (inject future-dated row, assert reader rejects). → P1.1.code.parquet
+- [x] **P1.1.plan [plan]** Author `data-foundation-plan.md` (per-task breakdown, ordering, owner streams). → P1.1.spec  (PR #8)
+- [x] **P1.1.tasks [plan]** Author `data-foundation-tasks.md` with PR-sized chunks. → P1.1.plan  (PR #8)
+- [x] **P1.1.A connector skeleton + yfinance** [code+test] — Connector ABC, RateLimiter, ConnectorResult, errors; YFinanceConnector with rate-limit + backoff; 23 mocked-HTTP tests.  (PR #9)
+- [x] **P1.1.B parquet writer + PIT view** [code+test] — `ParquetAdapter` with append-only writes + PIT-correct reads; `pit_view_ohlcv` / `pit_view_macro`; round-trip + PIT-correctness + append-only + multi-source consistency tests.  (PR #10)
+- [x] **P1.1.C FRED connector + release-calendar** [code+test] — `FredConnector` + `ReleaseCalendar` populating `as_of_release_date` from FRED's release-calendar API; 18 mocked-HTTP tests.  (PR #11)
+- [x] **P1.1.D coverage + audit + ingest orchestrator** [code+test] — NYSE-trading-calendar-aware coverage monitor; hash-chained Postgres audit logger + manifest-parquet writer; `Ingest` orchestrator with FRESH/BACKFILL modes; pure-unit + Postgres-integration tests.  (PR #12)
+- [x] **P1.1.E end-to-end integration test + CI** [test+infra] — `tests/integration/phase-1/data_foundation/test_end_to_end.py` round-trips yfinance + FRED through the full path with mocked HTTP + real Postgres; CI workflow runs it in `integration-smoke`.  (PR #13, this PR)
 
 ### P1.2 — `universe-spec.md` (sub-feature 2)
 
