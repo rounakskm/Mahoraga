@@ -2,6 +2,9 @@ import os
 import psycopg
 import pytest
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture
 def conn():
     dsn = os.environ.get("MAHORAGA_TEST_DSN", "postgresql://postgres:change_me_locally@localhost:5432/postgres")
