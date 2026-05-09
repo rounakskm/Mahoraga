@@ -36,8 +36,8 @@ services/trader/data/
 | Chunk | Branch | Status |
 |---|---|---|
 | 1. Connector skeleton + yfinance | `phase-1-data-foundation-connectors` | Merged |
-| 2. Parquet writer + PIT view | `phase-1-data-foundation-storage` | **In review (this PR)** |
-| 3. FRED connector + macro schema | `phase-1-data-foundation-fred` | Planned |
+| 2. Parquet writer + PIT view | `phase-1-data-foundation-storage` | Merged |
+| 3. FRED connector + macro schema | `phase-1-data-foundation-fred` | **In review (this PR)** |
 | 4. Coverage + audit-log integration | `phase-1-data-foundation-coverage` | Planned |
 | 5. End-to-end integration test + CI | `phase-1-data-foundation-integration` | Planned |
 
@@ -87,7 +87,26 @@ Yahoo or FRED endpoints, so they are CI-safe and offline.
 ## Required environment variables (by chunk)
 
 - Chunk 1 (yfinance): no API key required.
-- Chunk 3+ (FRED, BLS): `FRED_API_KEY`, optionally `BLS_API_KEY`. See `.env.example`.
+- Chunk 3 (FRED): `FRED_API_KEY` is **required**. Free, instant: https://fred.stlouisfed.org/docs/api/api_key.html
+- Chunk 3+ (BLS): `BLS_API_KEY` optional, used for cross-checking FRED CPI/NFP release timing.
+
+## FRED connector usage (chunk 3)
+
+```python
+from datetime import date
+from services.trader.data.connectors.fred import FredConnector
+
+connector = FredConnector(api_key=os.environ["FRED_API_KEY"])
+result = connector.fetch("CPIAUCSL", date(2026, 1, 1), date(2026, 12, 31))
+# result.frame columns:
+#   indicator, reference_date, as_of_release_date, value, unit, source, fetched_at
+# Every row's `as_of_release_date` is computed via FRED's release-calendar API
+# so downstream PIT-correct reads can filter on it.
+```
+
+The `as_of_release_date` field is the load-bearing piece: it's the date FRED
+first published this value, which is what the storage layer's `pit_view_macro`
+gates against when serving reads at a simulated `asof` timestamp.
 
 ## Substrate-portability discipline
 
