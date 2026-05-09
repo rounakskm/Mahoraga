@@ -138,6 +138,46 @@ The orchestrator:
 - writes one hash-chained row to Postgres `audit.events` per run (when
   `MAHORAGA_AUDIT_DSN` or `MAHORAGA_TEST_DSN` is set).
 
+## Vault embargo (P1.3)
+
+`ParquetAdapter` enforces a rolling embargo over the most recent N days
+when `vault_cutoff_days` is set:
+
+```python
+from services.trader.data.audit import PostgresAuditWriter
+from services.trader.data.storage import ParquetAdapter, VaultEmbargoError
+
+adapter = ParquetAdapter(
+    "data/parquet",
+    vault_cutoff_days=180,
+    audit_writer=PostgresAuditWriter(dsn=os.environ["MAHORAGA_AUDIT_DSN"]),
+    audit_actor="trader-backtest",
+)
+
+# Reads inside the last 180 days raise by default — the policy is impossible
+# to bypass silently:
+try:
+    adapter.read(kind="ohlcv", keys=["SPY"],
+                 start=datetime(2026, 5, 1, tzinfo=UTC),
+                 end=datetime.now(UTC))
+except VaultEmbargoError as exc:
+    print(f"vault hit: cutoff={exc.vault_cutoff}")
+
+# To bypass deliberately, pass vault_override=True AND vault_override_reason.
+# The override path writes a hash-chained `audit.events` row with action=
+# 'vault_override' so the bypass is forensically reconstructible.
+adapter.read(
+    kind="ohlcv", keys=["SPY"],
+    start=datetime(2026, 5, 1, tzinfo=UTC),
+    end=datetime.now(UTC),
+    vault_override=True,
+    vault_override_reason="live-PnL reconciliation against the broker tape",
+)
+```
+
+The default `vault_cutoff_days=None` (no enforcement) is preserved for
+back-compat with the P1.1 chunks; chunk V3 will flip that to 180.
+
 ## Substrate-portability discipline
 
 Per `CLAUDE.md` item 7, this package contains **only** plain Python with clean

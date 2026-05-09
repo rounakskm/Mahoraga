@@ -161,6 +161,7 @@ class TestAdapterEnforced:
                 end=datetime(2026, 5, 9, tzinfo=UTC),
                 asof=datetime(2026, 5, 9, tzinfo=UTC),
                 vault_override=True,
+                vault_override_reason="phase-1 vault-test",
             )
         assert len(out) == 3
         assert any("vault_override=True" in r.getMessage() for r in caplog.records)
@@ -193,5 +194,170 @@ def test_vault_error_repr_lists_all_fields() -> None:
     assert "2026-05-01" in msg
     assert "2025-11-10" in msg
     assert "vault_override" in msg
+
+
+# --- chunk V2: vault_override_reason + audit-writer wire-up -------------
+
+
+class _FakeAuditWriter:
+    """Records vault_override calls for assertion in tests."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self._fail = fail
+        self.calls: list[dict[str, object]] = []
+
+    def is_enabled(self) -> bool:
+        return True
+
+    def write(
+        self, *, actor: str, action: str, payload: dict[str, object]
+    ) -> bytes | None:
+        if self._fail:
+            raise RuntimeError("simulated postgres outage")
+        self.calls.append({"actor": actor, "action": action, "payload": dict(payload)})
+        return b"\x00" * 32  # fake hash
+
+
+class TestOverrideReasonRequired:
+    @pytest.fixture
+    def adapter(self, tmp_path: Path) -> ParquetAdapter:
+        return ParquetAdapter(tmp_path, vault_cutoff_days=180)
+
+    def test_override_without_reason_raises(self, adapter: ParquetAdapter) -> None:
+        df = make_ohlcv_frame(
+            ticker="SPY", start=datetime(2026, 5, 1, tzinfo=UTC), bars=3
+        )
+        adapter.write(_result(df), kind="ohlcv")
+        with pytest.raises(ValueError, match="vault_override_reason"):
+            adapter.read(
+                kind="ohlcv",
+                keys=["SPY"],
+                start=datetime(2026, 5, 1, tzinfo=UTC),
+                end=datetime(2026, 5, 9, tzinfo=UTC),
+                asof=datetime(2026, 5, 9, tzinfo=UTC),
+                vault_override=True,
+                # vault_override_reason intentionally absent
+            )
+
+    def test_override_with_blank_reason_raises(self, adapter: ParquetAdapter) -> None:
+        df = make_ohlcv_frame(
+            ticker="SPY", start=datetime(2026, 5, 1, tzinfo=UTC), bars=3
+        )
+        adapter.write(_result(df), kind="ohlcv")
+        with pytest.raises(ValueError, match="vault_override_reason"):
+            adapter.read(
+                kind="ohlcv",
+                keys=["SPY"],
+                start=datetime(2026, 5, 1, tzinfo=UTC),
+                end=datetime(2026, 5, 9, tzinfo=UTC),
+                asof=datetime(2026, 5, 9, tzinfo=UTC),
+                vault_override=True,
+                vault_override_reason="   ",  # whitespace-only is rejected
+            )
+
+    def test_override_outside_vault_does_not_require_reason(
+        self, adapter: ParquetAdapter
+    ) -> None:
+        # If the requested window doesn't overlap the vault, override is moot —
+        # we shouldn't require a reason since no embargo would have fired.
+        df = make_ohlcv_frame(
+            ticker="SPY", start=datetime(2018, 1, 8, tzinfo=UTC), bars=3
+        )
+        adapter.write(_result(df), kind="ohlcv")
+        out = adapter.read(
+            kind="ohlcv",
+            keys=["SPY"],
+            start=datetime(2018, 1, 1, tzinfo=UTC),
+            end=datetime(2018, 1, 31, tzinfo=UTC),
+            asof=datetime(2026, 5, 9, tzinfo=UTC),
+            vault_override=True,
+            # no reason — fine because no overlap
+        )
+        assert len(out) == 3
+
+
+class TestAuditWriterWireUp:
+    def _adapter_with_audit(
+        self, tmp_path: Path, *, fail: bool = False
+    ) -> tuple[ParquetAdapter, _FakeAuditWriter]:
+        writer = _FakeAuditWriter(fail=fail)
+        adapter = ParquetAdapter(
+            tmp_path,
+            vault_cutoff_days=180,
+            audit_writer=writer,  # type: ignore[arg-type]
+            audit_actor="test-vault-actor",
+        )
+        return adapter, writer
+
+    def test_override_writes_one_audit_row(self, tmp_path: Path) -> None:
+        adapter, writer = self._adapter_with_audit(tmp_path)
+        df = make_ohlcv_frame(
+            ticker="SPY", start=datetime(2026, 5, 1, tzinfo=UTC), bars=3
+        )
+        adapter.write(_result(df), kind="ohlcv")
+        adapter.read(
+            kind="ohlcv",
+            keys=["SPY", "QQQ", "IWM"],
+            start=datetime(2026, 5, 1, tzinfo=UTC),
+            end=datetime(2026, 5, 9, tzinfo=UTC),
+            asof=datetime(2026, 5, 9, tzinfo=UTC),
+            vault_override=True,
+            vault_override_reason="needed for live PnL reconciliation",
+        )
+        assert len(writer.calls) == 1
+        call = writer.calls[0]
+        assert call["actor"] == "test-vault-actor"
+        assert call["action"] == "vault_override"
+        payload = call["payload"]
+        assert payload["kind"] == "ohlcv"
+        assert payload["keys_count"] == 3
+        assert payload["keys_sample"] == ["SPY", "QQQ", "IWM"]
+        assert payload["reason"] == "needed for live PnL reconciliation"
+
+    def test_audit_failure_does_not_suppress_read(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        adapter, writer = self._adapter_with_audit(tmp_path, fail=True)
+        df = make_ohlcv_frame(
+            ticker="SPY", start=datetime(2026, 5, 1, tzinfo=UTC), bars=3
+        )
+        adapter.write(_result(df), kind="ohlcv")
+        with caplog.at_level(logging.ERROR):
+            out = adapter.read(
+                kind="ohlcv",
+                keys=["SPY"],
+                start=datetime(2026, 5, 1, tzinfo=UTC),
+                end=datetime(2026, 5, 9, tzinfo=UTC),
+                asof=datetime(2026, 5, 9, tzinfo=UTC),
+                vault_override=True,
+                vault_override_reason="best-effort smoke",
+            )
+        # Read still returns data even though audit-write blew up
+        assert len(out) == 3
+        assert any("audit-events write failed" in r.getMessage() for r in caplog.records)
+
+    def test_no_audit_writer_logs_skip(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # vault_cutoff_days set, but no audit_writer wired
+        adapter = ParquetAdapter(tmp_path, vault_cutoff_days=180)
+        df = make_ohlcv_frame(
+            ticker="SPY", start=datetime(2026, 5, 1, tzinfo=UTC), bars=3
+        )
+        adapter.write(_result(df), kind="ohlcv")
+        with caplog.at_level(logging.WARNING):
+            out = adapter.read(
+                kind="ohlcv",
+                keys=["SPY"],
+                start=datetime(2026, 5, 1, tzinfo=UTC),
+                end=datetime(2026, 5, 9, tzinfo=UTC),
+                asof=datetime(2026, 5, 9, tzinfo=UTC),
+                vault_override=True,
+                vault_override_reason="local debug",
+            )
+        assert len(out) == 3
+        assert any(
+            "audit-events row not recorded" in r.getMessage() for r in caplog.records
+        )
 
 
