@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import statistics
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -47,7 +47,7 @@ def main() -> None:
     p90 = sorted(durations)[int(0.9 * N) - 1]
     per_hour = 3600.0 / median
     row = (
-        f"| {datetime.now(timezone.utc).isoformat()} | {MODEL} ({actual_tag}) | {N} | "
+        f"| {datetime.now(UTC).isoformat()} | {MODEL} ({actual_tag}) | {N} | "
         f"{median:.2f}s median | {p90:.2f}s p90 | {per_hour:.1f}/hr |"
     )
     out_path = "docs/measurements/phase-0-llm-throughput.md"

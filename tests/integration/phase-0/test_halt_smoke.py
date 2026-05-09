@@ -17,8 +17,9 @@ import time
 import psycopg
 import pytest
 
-DSN = os.environ["MAHORAGA_TEST_DSN"] if "MAHORAGA_TEST_DSN" in os.environ else (
-    "postgresql://postgres:change_me_locally@localhost:5432/postgres"
+DSN = os.environ.get(
+    "MAHORAGA_TEST_DSN",
+    "postgresql://postgres:change_me_locally@localhost:5432/postgres",
 )
 
 
