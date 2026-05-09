@@ -191,6 +191,8 @@ class TestEndToEnd:
             end=date(2026, 2, 28),
             expected_reference_dates={"CPIAUCSL": expected_refs},
             mode=IngestMode.FRESH,
+            # As-of after the latest expected release (Feb 13) so coverage sees all 3 rows
+            coverage_asof=datetime(2026, 4, 1, tzinfo=UTC),
         )
 
         # --- 1. round-trip: read OHLCV via PIT view ----------------------
