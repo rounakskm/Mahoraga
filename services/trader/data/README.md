@@ -37,8 +37,8 @@ services/trader/data/
 |---|---|---|
 | 1. Connector skeleton + yfinance | `phase-1-data-foundation-connectors` | Merged |
 | 2. Parquet writer + PIT view | `phase-1-data-foundation-storage` | Merged |
-| 3. FRED connector + macro schema | `phase-1-data-foundation-fred` | **In review (this PR)** |
-| 4. Coverage + audit-log integration | `phase-1-data-foundation-coverage` | Planned |
+| 3. FRED connector + macro schema | `phase-1-data-foundation-fred` | Merged |
+| 4. Coverage + audit-log integration | `phase-1-data-foundation-coverage` | **In review (this PR)** |
 | 5. End-to-end integration test + CI | `phase-1-data-foundation-integration` | Planned |
 
 ## Storage adapter API (chunk 2)
@@ -107,6 +107,36 @@ result = connector.fetch("CPIAUCSL", date(2026, 1, 1), date(2026, 12, 31))
 The `as_of_release_date` field is the load-bearing piece: it's the date FRED
 first published this value, which is what the storage layer's `pit_view_macro`
 gates against when serving reads at a simulated `asof` timestamp.
+
+## Orchestrated ingest (chunk 4)
+
+Wire a connector + the storage adapter + the audit logger together:
+
+```python
+from services.trader.data.audit import make_audit_logger_from_env
+from services.trader.data.ingest import Ingest, IngestMode
+from services.trader.data.storage import ParquetAdapter
+from services.trader.data.connectors.yfinance import YFinanceConnector
+
+adapter = ParquetAdapter("data/parquet")
+audit = make_audit_logger_from_env(parquet_root="data/parquet")
+ingest = Ingest(adapter=adapter, audit=audit)
+
+result = ingest.run_ohlcv(
+    YFinanceConnector(),
+    tickers=["SPY", "QQQ", "IWM"],
+    start=date(2026, 1, 1),
+    end=date(2026, 12, 31),
+    mode=IngestMode.FRESH,  # raise on per-key coverage <99%
+)
+```
+
+The orchestrator:
+- runs the connector + writes parquet via the adapter,
+- computes per-key coverage against the NYSE trading calendar,
+- writes one row to `data/parquet/manifests/ingest-runs.parquet` per run,
+- writes one hash-chained row to Postgres `audit.events` per run (when
+  `MAHORAGA_AUDIT_DSN` or `MAHORAGA_TEST_DSN` is set).
 
 ## Substrate-portability discipline
 
