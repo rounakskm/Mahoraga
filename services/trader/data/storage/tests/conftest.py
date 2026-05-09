@@ -14,7 +14,9 @@ from services.trader.data.storage.schema import OHLCV_ARROW_SCHEMA
 
 @pytest.fixture
 def adapter(tmp_path: Path) -> ParquetAdapter:
-    return ParquetAdapter(tmp_path)
+    # Storage-mechanics tests don't exercise vault policy; opt out so the
+    # default 180-day vault doesn't false-positive on tests using 2026 dates.
+    return ParquetAdapter(tmp_path, vault_cutoff_days=None)
 
 
 def make_ohlcv_frame(

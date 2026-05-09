@@ -93,11 +93,32 @@ class TestAssessVault:
 
 
 class TestAdapterDefault:
-    """The default `vault_cutoff_days=None` must preserve P1.1 behaviour."""
+    """As of chunk V3, the default `vault_cutoff_days` is 180 days."""
 
-    def test_default_no_vault_enforcement(self, tmp_path: Path) -> None:
+    def test_default_enforces_180_day_vault(self, tmp_path: Path) -> None:
+        # No kwargs: default vault_cutoff_days=180 must fire on a recent read.
         adapter = ParquetAdapter(tmp_path)
-        df = make_ohlcv_frame(ticker="SPY", start=datetime(2026, 5, 1, tzinfo=UTC), bars=3)
+        assert adapter.vault_cutoff_days == 180
+        df = make_ohlcv_frame(
+            ticker="SPY", start=datetime(2026, 5, 1, tzinfo=UTC), bars=3
+        )
+        adapter.write(_result(df), kind="ohlcv")
+        with pytest.raises(VaultEmbargoError):
+            adapter.read(
+                kind="ohlcv",
+                keys=["SPY"],
+                start=datetime(2026, 5, 1, tzinfo=UTC),
+                end=datetime(2026, 5, 9, tzinfo=UTC),
+                asof=datetime(2026, 5, 9, tzinfo=UTC),
+            )
+
+    def test_explicit_none_disables_enforcement(self, tmp_path: Path) -> None:
+        # Opt out by passing None — the legitimate path for backfill jobs and
+        # tests that don't care about vault policy.
+        adapter = ParquetAdapter(tmp_path, vault_cutoff_days=None)
+        df = make_ohlcv_frame(
+            ticker="SPY", start=datetime(2026, 5, 1, tzinfo=UTC), bars=3
+        )
         adapter.write(_result(df), kind="ohlcv")
         out = adapter.read(
             kind="ohlcv",
@@ -106,7 +127,6 @@ class TestAdapterDefault:
             end=datetime(2026, 5, 9, tzinfo=UTC),
             asof=datetime(2026, 5, 9, tzinfo=UTC),
         )
-        # Returns data even though [May 1, May 9] is firmly inside any reasonable vault
         assert len(out) == 3
 
     def test_invalid_cutoff_rejected(self, tmp_path: Path) -> None:
