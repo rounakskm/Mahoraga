@@ -40,7 +40,7 @@ def synthetic_ohlcv(
             "volume":        volumes,
             "adj_close":     closes.astype("float64"),
             "source":        "test",
-            "fetched_at":    pd.Timestamp(start + timedelta(days=bars), tz="UTC"),
+            "fetched_at":    pd.Timestamp(start + timedelta(days=bars)),
             "revision_at":   pd.NaT,
         }
     )
