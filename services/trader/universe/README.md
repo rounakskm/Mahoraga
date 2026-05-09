@@ -67,9 +67,43 @@ The loader rejects malformed YAML at startup:
 
 | Chunk | Branch | Status |
 |---|---|---|
-| U1. YAML schema + loader | `phase-1-universe-yaml-and-loader` | **In review (this PR)** |
-| U2. Bootstrap scripts (Wikipedia + FTSE Russell) | `phase-1-universe-bootstrap-scripts` | Planned |
+| U1. YAML schema + loader | `phase-1-universe-yaml-and-loader` | Merged |
+| U2. Bootstrap scripts (Wikipedia) | `phase-1-universe-bootstrap-scripts` | **In review (this PR)** |
 | U3. Index-reproduction audit test | `phase-1-universe-index-reproduction` | Planned |
+
+## Operator runbook (chunk U2)
+
+Regenerate the S&P 500 YAML files from the latest Wikipedia snapshot:
+
+```bash
+python scripts/build_sp500_universe.py \
+    --root data/universe \
+    --seed-date 2014-01-01
+```
+
+Optional environment variables:
+
+- `MAHORAGA_AUDIT_DSN` (or `MAHORAGA_TEST_DSN`) — Postgres DSN. When set, a
+  hash-chained `audit.events` row with `action='universe_rebuild'` is
+  written, mirroring the data-foundation manifest pattern.
+
+After the script runs:
+
+- `data/universe/sp500/seed.yaml` — back-derived membership at `seed_date`
+- `data/universe/sp500/events.yaml` — adds/removes from `seed_date` to today
+- `data/universe/manifests/universe-rebuilds.parquet` — new row per run with
+  `run_id`, `seed_size`, `events_count`, error list
+
+Re-running the script is idempotent: same Wikipedia state → same YAML
+output (the back-derivation is deterministic). Any divergence between two
+consecutive builds reflects real Wikipedia edits.
+
+### Russell 1000 — deferred to a follow-up
+
+FTSE Russell publishes annual reconstitution PRs in June each year, but
+the Wikipedia Russell 1000 article doesn't carry a clean changes table.
+For Phase 1, Russell 1000 stays on the small hand-curated YAML committed
+in U1; a future sub-feature will scrape FTSE Russell directly.
 
 ## What U1 ships vs U2
 
