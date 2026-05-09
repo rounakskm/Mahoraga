@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: Apache-2.0
+# Phase 1 ETF allowlist for the Mahoraga universe.
+#
+# Coverage: broad market, US sector SPDRs, commodity, thematic (BTC ETFs included
+# but production-disabled until P1.7's btc-data sub-feature lands).
+#
+# Sources are public listing announcements; dates verified against ETF.com and
+# the issuer's product pages.
+tickers:
+  # Broad market
+  - ticker: SPY
+    listed_at: 1993-01-22
+    category: broad-us-large
+  - ticker: QQQ
+    listed_at: 1999-03-10
+    category: broad-us-large
+  - ticker: IWM
+    listed_at: 2000-05-22
+    category: broad-us-small
+  - ticker: VTI
+    listed_at: 2001-05-31
+    category: broad-us-total
+  - ticker: VOO
+    listed_at: 2010-09-09
+    category: broad-us-large
+
+  # US sector SPDRs
+  - ticker: XLF
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLK
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLE
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLV
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLY
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLP
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLB
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLU
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLI
+    listed_at: 1998-12-22
+    category: sector-us
+  - ticker: XLRE
+    listed_at: 2015-10-08
+    category: sector-us
+  - ticker: XLC
+    listed_at: 2018-06-19
+    category: sector-us
+
+  # Commodity
+  - ticker: GLD
+    listed_at: 2004-11-18
+    category: commodity
+  - ticker: SLV
+    listed_at: 2006-04-28
+    category: commodity
+  - ticker: USO
+    listed_at: 2006-04-10
+    category: commodity
+
+  # BTC ETFs — registered for completeness; the data work for these is
+  # deferred to P1.7 (btc-data-spec.md).
+  - ticker: IBIT
+    listed_at: 2024-01-11
+    category: btc-etf
+  - ticker: FBTC
+    listed_at: 2024-01-11
+    category: btc-etf
+  - ticker: BITB
+    listed_at: 2024-01-11
+    category: btc-etf
+  - ticker: ARKB
+    listed_at: 2024-01-11
+    category: btc-etf
+  - ticker: GBTC
+    listed_at: 2013-09-25
+    category: btc-etf

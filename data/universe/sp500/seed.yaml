@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+# S&P 500 PIT seed for Mahoraga Phase 1.
+#
+# This is a SMALL hand-curated bootstrap covering 2014 → 2018. The full ≥10 y
+# history lands in chunk U2 (`scripts/build_sp500_universe.py`). The schema +
+# loader contract is the same; only the row count differs.
+#
+# Source: Wikipedia "List of S&P 500 companies" snapshot 2014-01-01 (cross-checked
+# against several historical lists — only a small subset is enumerated here so
+# the chunk-U1 PR stays small; chunk U2 fetches the full ~500-name list from
+# Wikipedia at run time and writes a much larger seed.yaml).
+name: sp500
+seed_date: 2014-01-01
+members:
+  - AAPL
+  - MSFT
+  - GOOG    # Class C, listed 2014-04
+  - GOOGL   # Class A
+  - AMZN
+  - JPM
+  - JNJ
+  - PG
+  - XOM
+  - WMT
+  - BAC
+  - WFC
+  - GE
+  - PFE
+  - VZ
+  - T
+  - KO
+  - PEP
+  - HD
+  - DIS

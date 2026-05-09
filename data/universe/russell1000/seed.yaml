@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# Russell 1000 PIT seed (chunk U1 bootstrap; full history in chunk U2).
+#
+# The Russell 1000 is the top 1000 US stocks by market cap, reconstituted
+# annually each June. We track the same way as S&P 500: a seed snapshot plus
+# add/remove events tied to reconstitution day + interim corporate-action
+# changes.
+name: russell1000
+seed_date: 2014-01-01
+members:
+  - AAPL
+  - MSFT
+  - GOOG
+  - GOOGL
+  - AMZN
+  - JPM
+  - JNJ
+  - PG
+  - XOM
+  - WMT
