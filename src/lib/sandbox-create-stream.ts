@@ -3,7 +3,7 @@
 
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
-import { ROOT } from "./paths";
+import { ROOT } from "./state/paths";
 
 export interface StreamSandboxCreateResult {
   status: number;
@@ -48,6 +48,50 @@ export interface StreamableChildProcess {
   on(event: "close", listener: (code: number | null) => void): this;
 }
 
+export const BUILD_PROGRESS_PATTERNS: readonly RegExp[] = [
+  /^ {2}Building image /,
+  /^ {2}Step \d+\/\d+ : /,
+  /^#\d+ \[/,
+  /^#\d+ (DONE|CACHED)\b/,
+];
+
+const UPLOAD_PROGRESS_PATTERNS: readonly RegExp[] = [
+  /^ {2}Pushing image /,
+  /^\s*\[progress\]/,
+  /^ {2}Image .*available in the gateway/,
+];
+
+// Pull-phase indicators. Detect classic Docker pull output (`<tag>: Pulling
+// from <ref>`, `<id>: Pulling fs layer / Downloading / Extracting / Pull
+// complete`, `Status: Downloaded`, `Digest:`) plus BuildKit pull progress
+// (`#N resolve <ref>`, `#N sha256:<id> <size> / <total>`). The tag prefix
+// regex uses [^:\s]+ so non-lowercase tags (`v1.2.3`, `cuda-12.5`, `12.4`)
+// also match. See #1829.
+const PULL_PROGRESS_PATTERNS: readonly RegExp[] = [
+  /^\s*(?:[^:\s]+:\s+)?Pulling from \S+/,
+  /^\s*[a-f0-9]{6,}: (?:Pulling fs layer|Waiting|Downloading|Extracting|Pull complete|Verifying Checksum|Download complete)\b/,
+  /^\s*Status: (?:Downloaded|Image is up to date)/,
+  /^\s*Digest: sha256:[a-f0-9]{8,}/,
+  /^\s*#\d+\s+(?:resolve\s+\S+|sha256:[a-f0-9]+\s+[\d.]+\s*(?:B|KB|MB|GB)\s*\/)/,
+];
+
+const VISIBLE_PROGRESS_PATTERNS: readonly RegExp[] = [
+  ...BUILD_PROGRESS_PATTERNS,
+  /^ {2}Context: /,
+  /^ {2}Gateway: /,
+  /^Successfully built /,
+  /^Successfully tagged /,
+  /^ {2}Built image /,
+  ...UPLOAD_PROGRESS_PATTERNS,
+  ...PULL_PROGRESS_PATTERNS,
+  /^Created sandbox: /,
+  /^✓ /,
+];
+
+function matchesAny(line: string, patterns: readonly RegExp[]) {
+  return patterns.some((pattern) => pattern.test(line));
+}
+
 export function streamSandboxCreate(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -71,7 +115,7 @@ export function streamSandboxCreate(
   const silentPhaseMs = options.silentPhaseMs || 15000;
   const startedAt = Date.now();
   let lastOutputAt = startedAt;
-  type CreatePhase = "build" | "upload" | "create" | "ready";
+  type CreatePhase = "pull" | "build" | "upload" | "create" | "ready";
 
   let currentPhase: CreatePhase | null = null;
   let lastHeartbeatPhase: CreatePhase | null = null;
@@ -107,15 +151,17 @@ export function streamSandboxCreate(
     lastHeartbeatPhase = null;
     lastHeartbeatBucket = -1;
     const phaseLine =
-      nextPhase === "build"
-        ? "  Building sandbox image..."
-        : nextPhase === "upload"
-          ? "  Uploading image into OpenShell gateway..."
-          : nextPhase === "create"
-            ? "  Creating sandbox in gateway..."
-            : nextPhase === "ready"
-              ? "  Waiting for sandbox to become ready..."
-              : null;
+      nextPhase === "pull"
+        ? "  Pulling base image from registry..."
+        : nextPhase === "build"
+          ? "  Building sandbox image..."
+          : nextPhase === "upload"
+            ? "  Uploading image into OpenShell gateway..."
+            : nextPhase === "create"
+              ? "  Creating sandbox in gateway..."
+              : nextPhase === "ready"
+                ? "  Waiting for sandbox to become ready..."
+                : null;
     if (phaseLine) printProgressLine(phaseLine);
   }
 
@@ -124,13 +170,11 @@ export function streamSandboxCreate(
     if (!line) return;
     lines.push(line);
     lastOutputAt = Date.now();
-    if (/^ {2}Building image /.test(line) || /^ {2}Step \d+\/\d+ : /.test(line)) {
+    if (matchesAny(line, BUILD_PROGRESS_PATTERNS)) {
       setPhase("build");
-    } else if (
-      /^ {2}Pushing image /.test(line) ||
-      /^\s*\[progress\]/.test(line) ||
-      /^ {2}Image .*available in the gateway/.test(line)
-    ) {
+    } else if (matchesAny(line, PULL_PROGRESS_PATTERNS)) {
+      setPhase("pull");
+    } else if (matchesAny(line, UPLOAD_PROGRESS_PATTERNS)) {
       setPhase("upload");
     } else if (/^Created sandbox: /.test(line)) {
       setPhase("create");
@@ -142,20 +186,7 @@ export function streamSandboxCreate(
   }
 
   function shouldShowLine(line: string) {
-    return (
-      /^ {2}Building image /.test(line) ||
-      /^ {2}Step \d+\/\d+ : /.test(line) ||
-      /^ {2}Context: /.test(line) ||
-      /^ {2}Gateway: /.test(line) ||
-      /^Successfully built /.test(line) ||
-      /^Successfully tagged /.test(line) ||
-      /^ {2}Built image /.test(line) ||
-      /^ {2}Pushing image /.test(line) ||
-      /^\s*\[progress\]/.test(line) ||
-      /^ {2}Image .*available in the gateway/.test(line) ||
-      /^Created sandbox: /.test(line) ||
-      /^✓ /.test(line)
-    );
+    return matchesAny(line, VISIBLE_PROGRESS_PATTERNS);
   }
 
   function onChunk(chunk: Buffer | string) {
@@ -234,13 +265,15 @@ export function streamSandboxCreate(
       return;
     }
     const heartbeatLine =
-      currentPhase === "upload"
-        ? `  Still uploading image into OpenShell gateway... (${elapsed}s elapsed)`
-        : currentPhase === "create"
-          ? `  Still creating sandbox in gateway... (${elapsed}s elapsed)`
-          : currentPhase === "ready"
-            ? `  Still waiting for sandbox to become ready... (${elapsed}s elapsed)`
-            : `  Still building sandbox image... (${elapsed}s elapsed)`;
+      currentPhase === "pull"
+        ? `  Still pulling base image from registry... (${elapsed}s elapsed)`
+        : currentPhase === "upload"
+          ? `  Still uploading image into OpenShell gateway... (${elapsed}s elapsed)`
+          : currentPhase === "create"
+            ? `  Still creating sandbox in gateway... (${elapsed}s elapsed)`
+            : currentPhase === "ready"
+              ? `  Still waiting for sandbox to become ready... (${elapsed}s elapsed)`
+              : `  Still building sandbox image... (${elapsed}s elapsed)`;
     if (trimDisplayLine(heartbeatLine) !== lastPrintedLine) {
       printProgressLine(heartbeatLine);
       lastHeartbeatPhase = currentPhase;

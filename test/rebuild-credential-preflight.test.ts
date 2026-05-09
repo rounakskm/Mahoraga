@@ -48,6 +48,10 @@ function createFixture(opts: {
   savedCredential?: { key: string; value: string };
   /** If set, the onboard-session.json provider_selection step status */
   providerSelectionStatus?: string;
+  agent?: string | null;
+  messagingChannels?: string[] | null;
+  providerCredentialHashes?: Record<string, string>;
+  dockerBuildExitCode?: number;
 }) {
   const {
     sandboxName = "my-assistant",
@@ -55,6 +59,10 @@ function createFixture(opts: {
     credentialEnv = "NVIDIA_API_KEY",
     savedCredential,
     providerSelectionStatus = "complete",
+    agent = null,
+    messagingChannels = null,
+    providerCredentialHashes,
+    dockerBuildExitCode = 0,
   } = opts;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-2273-"));
   tmpFixtures.push(tmpDir);
@@ -73,7 +81,9 @@ function createFixture(opts: {
           provider,
           gpuEnabled: false,
           policies: [],
-          agent: null,
+          agent,
+          messagingChannels,
+          ...(providerCredentialHashes ? { providerCredentialHashes } : {}),
         },
       },
     }),
@@ -204,6 +214,23 @@ process.exit(0);
     { mode: 0o755 },
   );
 
+  // ── Fake Docker ───────────────────────────────────────────────
+  // Hermes rebuild forces a base-image build before backup/delete.
+  // This fixture only exercises rebuild session state, so Docker succeeds.
+  fs.writeFileSync(
+    path.join(tmpDir, "docker"),
+    `#!/usr/bin/env node
+const a = process.argv.slice(2);
+if (a[0]==="build") { process.exit(${dockerBuildExitCode}); }
+if (a[0]==="image" && a[1]==="inspect") { process.exit(0); }
+if (a[0]==="inspect") { process.stdout.write("true\\n"); process.exit(0); }
+if (a[0]==="ps") { process.exit(0); }
+process.stderr.write("unexpected docker call: " + a.join(" ") + "\\n");
+process.exit(1);
+`,
+    { mode: 0o755 },
+  );
+
   // ── Fake ssh ──────────────────────────────────────────────────
   fs.writeFileSync(
     path.join(tmpDir, "ssh"),
@@ -327,6 +354,60 @@ describe("Issue #2273: atomic rebuild", () => {
     );
 
     it(
+      "copies Hermes messaging channels from the registry into the rebuild resume session",
+      { timeout: 60_000 },
+      () => {
+        const f = createFixture({
+          agent: "hermes",
+          messagingChannels: ["discord"],
+          providerCredentialHashes: { DISCORD_BOT_TOKEN: "hash-discord" },
+          credentialEnv: "NVIDIA_API_KEY",
+          savedCredential: {
+            key: "NVIDIA_API_KEY",
+            value: "nvapi-test-key-for-rebuild",
+          },
+        });
+
+        const result = runRebuild(f);
+        const output = (result.stderr || "") + (result.stdout || "");
+        expect(output).toContain("Creating new sandbox with current image");
+
+        const session = JSON.parse(
+          fs.readFileSync(path.join(f.nemoclawDir, "onboard-session.json"), "utf-8"),
+        );
+        expect(session.agent).toBe("hermes");
+        expect(session.messagingChannels).toEqual(["discord"]);
+      },
+    );
+
+    it(
+      "aborts rebuild before backup when forced Hermes base image build fails",
+      { timeout: 60_000 },
+      () => {
+        const f = createFixture({
+          agent: "hermes",
+          credentialEnv: "NVIDIA_API_KEY",
+          savedCredential: {
+            key: "NVIDIA_API_KEY",
+            value: "nvapi-test-key-for-rebuild",
+          },
+          dockerBuildExitCode: 23,
+        });
+
+        const result = runRebuild(f);
+        const output = (result.stderr || "") + (result.stdout || "");
+
+        expect(result.status).not.toBe(0);
+        expect(output).toContain("Rebuild preflight failed");
+        expect(output).toContain("agent base image could not be built");
+        expect(output).toContain("Failed to build Hermes Agent base image (exit 23)");
+        expect(output).toContain("Sandbox is untouched");
+        expect(output).not.toContain("Backing up sandbox state");
+        expect(registryHasSandbox(f)).toBe(true);
+      },
+    );
+
+    it(
       "skips credential preflight for local inference (no credentialEnv in session)",
       { timeout: 60_000 },
       () => {
@@ -351,6 +432,36 @@ describe("Issue #2273: atomic rebuild", () => {
         // Should proceed to backup step
         expect(output).toContain("Backing up sandbox state");
       },
+    );
+
+    it.each([["ollama-local"], ["vllm-local"]])(
+      "migrates legacy %s sandbox off OPENAI_API_KEY (GH #2519)",
+      (provider) => {
+        // Pre-fix sandboxes recorded credentialEnv="OPENAI_API_KEY" even
+        // though local inference never actually needed it. After the fix,
+        // the wizard records null. Rebuild must accept the legacy value,
+        // print a one-time migration notice, and proceed even when no
+        // OPENAI_API_KEY exists in env or credentials.json.
+        const f = createFixture({
+          provider,
+          credentialEnv: "OPENAI_API_KEY",
+          // no savedCredential — host has no OPENAI_API_KEY anywhere
+        });
+
+        const result = runRebuild(f);
+        const output = (result.stderr || "") + (result.stdout || "");
+
+        // Must NOT bail with the usual missing-credential failure
+        expect(output).not.toContain("preflight failed");
+        expect(output).not.toContain("Missing credential: OPENAI_API_KEY");
+        // Must surface the migration notice so testers know the legacy
+        // behaviour was intentionally bypassed
+        expect(output).toContain("GH #2519");
+        expect(output).toContain(provider);
+        // Must continue into the backup step
+        expect(output).toContain("Backing up sandbox state");
+      },
+      60_000,
     );
 
     it(
