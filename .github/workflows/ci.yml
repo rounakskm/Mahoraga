@@ -24,8 +24,14 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pytest psycopg httpx
-      - name: Run unit tests
-        run: pytest -m "not integration" -v
+      - name: Run unit tests (exit 5 = no tests collected, tolerated in Phase 0)
+        run: |
+          set +e
+          pytest -m "not integration" -v
+          rc=$?
+          # 0 passed, 5 no-tests-collected; only integration tests exist in Phase 0
+          if [ "$rc" -eq 0 ] || [ "$rc" -eq 5 ]; then exit 0; fi
+          exit "$rc"
 
   integration-smoke:
     runs-on: ubuntu-latest

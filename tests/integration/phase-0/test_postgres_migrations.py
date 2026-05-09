@@ -1,6 +1,10 @@
 import os
+
 import psycopg
 import pytest
+
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def conn():

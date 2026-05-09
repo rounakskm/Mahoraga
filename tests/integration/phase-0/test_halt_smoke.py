@@ -1,50 +1,26 @@
-"""Halt smoke for the consolidated-assistant model.
+"""Halt smoke for the audit-poll-path mechanism.
 
-Phase 0 verifies two things:
-1. CLI-fallback halt: `nemoclaw stop` suspends the assistant; the audit log
-   records a halt event with `actor='operator-cli'`.
-2. Audit-log halt-poll path: a halt row inserted directly into `audit.events`
-   is visible to the polling check used by trade-execution tools (Phase 5+).
+Phase 0 verifies the substrate-side halt protocol: any actor (a future
+trader-halt CLI, an operator-direct INSERT, a Telegram bridge in Phase 6)
+writes a row to `audit.events` with `action='halt'`, and the polling check
+used by trade-execution tools sees it within the 2 s tolerance window.
 
-Telegram-based halt is verified in Phase 6 governance once the operator's
-bot is set up.
+The user-facing CLI halt command (`nemoclaw stop --name ...`) and the
+matching `halt_clear`/`resume` flow live at `services/trader/` and are a
+Phase 5+ deliverable. NemoClaw v0.1.0 does not ship a per-sandbox halt
+CLI — the only sandbox-lifecycle primitive is `nemoclaw <name> destroy`,
+which is destructive and not what the trading-halt protocol wants.
 """
 import os
-import subprocess
 import time
 
 import psycopg
 import pytest
 
-DSN = os.environ.get("MAHORAGA_TEST_DSN",
-                     "postgresql://postgres:change_me_locally@localhost:5432/postgres")
-
-
-def _audit_count(action: str) -> int:
-    with psycopg.connect(DSN) as c:
-        cur = c.execute("SELECT COUNT(*) FROM audit.events WHERE action = %s", (action,))
-        return cur.fetchone()[0]
-
-
-@pytest.mark.integration
-def test_cli_halt_suspends_and_audits():
-    """`nemoclaw stop` halts the assistant and writes a halt event."""
-    pre = _audit_count("halt")
-    out = subprocess.run(
-        ["nemoclaw", "stop", "--name", "mahoraga-trader",
-         "--reason", "phase-0-halt-smoke"],
-        capture_output=True, text=True, timeout=10,
-    )
-    assert out.returncode == 0, f"nemoclaw stop failed: {out.stderr}"
-
-    # Allow up to 2s for the halt event to be written
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        if _audit_count("halt") > pre:
-            break
-        time.sleep(0.1)
-    post = _audit_count("halt")
-    assert post == pre + 1, f"halt event not recorded ({pre} -> {post})"
+DSN = os.environ.get(
+    "MAHORAGA_TEST_DSN",
+    "postgresql://postgres:change_me_locally@localhost:5432/postgres",
+)
 
 
 @pytest.mark.integration
@@ -72,17 +48,14 @@ def test_audit_poll_path_visible():
 
 
 @pytest.mark.integration
-def test_resume_clears_halt():
-    """`nemoclaw resume` records a `halt_clear` event."""
-    pre = _audit_count("halt_clear")
-    out = subprocess.run(
-        ["nemoclaw", "resume", "--name", "mahoraga-trader"],
-        capture_output=True, text=True, timeout=10,
+def test_audit_hash_chain_initialized():
+    """The audit table's hash-chain column rejects NULL — every event must be hashed."""
+    with psycopg.connect(DSN) as c:
+        cur = c.execute(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_schema='audit' AND table_name='events' AND column_name='hash'"
+        )
+        row = cur.fetchone()
+    assert row is not None and row[0] == "NO", (
+        f"audit.events.hash must be NOT NULL; got is_nullable={row}"
     )
-    assert out.returncode == 0, f"nemoclaw resume failed: {out.stderr}"
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        if _audit_count("halt_clear") > pre:
-            break
-        time.sleep(0.1)
-    assert _audit_count("halt_clear") == pre + 1

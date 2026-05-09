@@ -6,9 +6,18 @@ requires-python = ">=3.11"
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+extend-exclude = [
+    "vendor",                  # Vendored upstreams (NemoClaw, tradingagents, hindsight, autoresearch, multiautoresearch) — they have their own linters
+    "data",                    # Bind-mount targets, gitignored
+    "docs/project_plan",       # Reference plan, not source
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RET"]
+
+[tool.ruff.lint.per-file-ignores]
+# `phase-0` has a hyphen by design (matches the spec directory naming).
+"tests/integration/phase-0/**" = ["N999"]
 
 [tool.mypy]
 python_version = "3.11"

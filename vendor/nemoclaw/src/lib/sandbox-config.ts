@@ -16,16 +16,18 @@ const readline = require("readline");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { promises: dnsPromises } = require("node:dns");
+const { isIP } = require("node:net");
 const { validateName } = require("./runner");
-const credentialFilter: typeof import("./credential-filter") = require("./credential-filter");
-const { stripCredentials, isConfigObject, isConfigValue } = credentialFilter;
-const { appendAuditEntry } = require("./shields-audit");
-const { isPrivateHostname } = require("./private-networks");
+const { dockerExecFileSync } = require("./adapters/docker/exec");
+const credentialFilter: typeof import("./security/credential-filter") = require("./security/credential-filter");
+const { stripCredentials, isConfigObject, isConfigValue, isCredentialField } = credentialFilter;
+const { appendAuditEntry } = require("./shields/audit");
+const { isPrivateHostname, isPrivateIp } = require("./private-networks");
 
-type ConfigObject = import("./credential-filter").ConfigObject;
-type ConfigValue = import("./credential-filter").ConfigValue;
-const { runOpenshellCommand, captureOpenshellCommand } = require("./openshell");
+type ConfigObject = import("./security/credential-filter").ConfigObject;
+type ConfigValue = import("./security/credential-filter").ConfigValue;
+const { runOpenshellCommand, captureOpenshellCommand } = require("./adapters/openshell/client");
 
 function parseJson<T>(text: string): T {
   return JSON.parse(text);
@@ -56,6 +58,29 @@ interface AgentConfigTarget {
   format: string;
   /** Config file basename */
   configFile: string;
+  /** Additional files to lock/unlock alongside the main config (e.g. .env, .config-hash) */
+  sensitiveFiles?: string[];
+}
+
+type LookupFn = (
+  hostname: string,
+  options: { all: true },
+) => Promise<Array<{ address: string; family?: number }>>;
+
+interface DnsValidatedUrl {
+  protocol: "http:" | "https:";
+  originalUrl: string;
+  pinnedUrl: string;
+}
+
+class ConfigUrlValidationError extends Error {
+  constructor(
+    readonly urlValue: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ConfigUrlValidationError";
+  }
 }
 
 const DEFAULT_AGENT_CONFIG: AgentConfigTarget = {
@@ -64,24 +89,31 @@ const DEFAULT_AGENT_CONFIG: AgentConfigTarget = {
   configDir: "/sandbox/.openclaw",
   format: "json",
   configFile: "openclaw.json",
+  sensitiveFiles: ["/sandbox/.openclaw/.config-hash"],
 };
 
 function resolveAgentConfig(sandboxName: string): AgentConfigTarget {
   try {
-    const registry = require("./registry");
+    const registry = require("./state/registry");
     const entry = registry.getSandbox(sandboxName);
     if (!entry || !entry.agent) return DEFAULT_AGENT_CONFIG;
 
-    const agentDefs = require("./agent-defs");
+    const agentDefs = require("./agent/defs");
     const agent = agentDefs.loadAgent(entry.agent);
     const cfg = agent.configPaths;
 
+    const dir = cfg.dir;
+    const sensitiveFiles = [`${dir}/.config-hash`];
+    // Hermes stores credentials in .env alongside the config
+    if (entry.agent === "hermes") sensitiveFiles.push(`${dir}/.env`);
+
     return {
       agentName: entry.agent,
-      configPath: `${cfg.immutableDir}/${cfg.configFile}`,
-      configDir: cfg.immutableDir,
+      configPath: `${dir}/${cfg.configFile}`,
+      configDir: dir,
       format: cfg.format || "json",
       configFile: cfg.configFile,
+      sensitiveFiles,
     };
   } catch {
     // Registry or agent-defs unavailable (e.g., during tests) — fall back
@@ -138,7 +170,7 @@ function setDotpath(obj: ConfigObject, dotpath: string, value: ConfigValue): voi
 }
 
 /**
- * Key segments that must never appear in a dotpath — blocking these prevents
+ * Key segments that must never appear in a dotpath - blocking these prevents
  * prototype-pollution and accidental traversal into inherited members.
  */
 const UNSAFE_KEY_SEGMENTS: ReadonlySet<string> = new Set([
@@ -154,7 +186,7 @@ type DotpathValidation = { ok: true } | { ok: false; reason: string };
 /**
  * Validate the syntax of a config dotpath: non-empty, no empty segments, no
  * prototype-pollution / inherited-member segments. Schema validity is not
- * checked here — `configSet` handles unknown paths via an interactive
+ * checked here - `configSet` handles unknown paths via an interactive
  * confirm or a `--config-accept-new-path` opt-in so first-time writes
  * under unset namespaces stay possible (see #2400).
  */
@@ -179,10 +211,10 @@ function validateConfigDotpath(dotpath: string): DotpathValidation {
  *     materialises plain objects, so allowing this would either clobber an
  *     existing array or create a confusingly object-shaped "array".
  *   - Non-object ancestor: an existing intermediate value (string, number,
- *     null, array, …) would be silently overwritten by `setDotpath` on its
+ *     null, array, ...) would be silently overwritten by `setDotpath` on its
  *     way to the leaf.
  *
- * Missing ancestors are fine — they get materialised on write. Returns
+ * Missing ancestors are fine - they get materialised on write. Returns
  * `null` when no refusal reason applies.
  */
 function findClobberingAncestor(
@@ -328,32 +360,175 @@ function readSandboxConfig(sandboxName: string, target: AgentConfigTarget): Conf
 }
 
 // ---------------------------------------------------------------------------
-// URL validation (literal-IP SSRF check for config set)
-//
-// isPrivateHostname is defined in ./private-networks alongside the shared
-// BlockList built from nemoclaw-blueprint/private-networks.yaml. DNS
-// rebinding (TOCTOU) protection is out of scope — the plugin's
-// validateEndpointUrl handles that via async DNS resolution and pinning.
+// URL validation (strict SSRF checks for config set)
 // ---------------------------------------------------------------------------
 
-function validateUrlValue(value: string): void {
+function parseHttpUrl(value: string): URL | null {
+  const trimmed = value.trim();
+  const lower = trimmed.toLowerCase();
   let parsed: URL;
   try {
-    parsed = new URL(value);
+    parsed = new URL(trimmed);
   } catch {
-    return; // Not a URL — skip validation
+    if (lower.startsWith("http://") || lower.startsWith("https://")) {
+      throw new Error("Invalid URL.");
+    }
+    return null; // Not a URL — skip validation
   }
 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(`URL scheme "${parsed.protocol}" is not allowed. Use http: or https:.`);
   }
 
-  if (isPrivateHostname(parsed.hostname)) {
+  if (!parsed.hostname) {
+    throw new Error("No hostname found in URL.");
+  }
+
+  return parsed;
+}
+
+function assertPublicHost(hostname: string): void {
+  if (isPrivateHostname(hostname)) {
     throw new Error(
-      `URL points to private/internal address "${parsed.hostname}". ` +
+      `URL points to private/internal address "${hostname}". ` +
         `This could expose internal services to the sandbox.`,
     );
   }
+}
+
+function hostnameForDnsLookup(hostname: string): string {
+  return hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+}
+
+function validateUrlValue(value: string): void {
+  const parsed = parseHttpUrl(value);
+  if (!parsed) return;
+  assertPublicHost(parsed.hostname);
+}
+
+async function validateUrlValueWithDnsResult(
+  value: string,
+  lookup: LookupFn = dnsPromises.lookup as LookupFn,
+): Promise<DnsValidatedUrl | null> {
+  const originalUrl = value.trim();
+  const parsed = parseHttpUrl(originalUrl);
+  if (!parsed) return null;
+
+  const hostname = parsed.hostname;
+  assertPublicHost(hostname);
+  const lookupHostname = hostnameForDnsLookup(hostname);
+  if (isIP(lookupHostname)) {
+    return { protocol: parsed.protocol as "http:" | "https:", originalUrl, pinnedUrl: originalUrl };
+  }
+
+  let addresses: Array<{ address: string; family?: number }>;
+  try {
+    addresses = await lookup(lookupHostname, { all: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Cannot resolve hostname "${hostname}": ${message}`);
+  }
+
+  if (!Array.isArray(addresses) || addresses.length === 0) {
+    throw new Error(`Cannot resolve hostname "${hostname}": no addresses returned.`);
+  }
+
+  for (const { address } of addresses) {
+    if (isPrivateIp(address)) {
+      throw new Error(
+        `URL hostname "${hostname}" resolves to private/internal address "${address}". ` +
+          `This could expose internal services to the sandbox.`,
+      );
+    }
+  }
+
+  const pinned = new URL(originalUrl);
+  const first = addresses[0];
+  const family = first.family ?? isIP(first.address);
+  pinned.hostname = family === 6 ? `[${first.address}]` : first.address;
+
+  return { protocol: parsed.protocol as "http:" | "https:", originalUrl, pinnedUrl: pinned.toString() };
+}
+
+async function validateUrlValueWithDns(
+  value: string,
+  lookup: LookupFn = dnsPromises.lookup as LookupFn,
+): Promise<void> {
+  await validateUrlValueWithDnsResult(value, lookup);
+}
+
+function redactUrlForLogs(urlValue: string): string {
+  try {
+    const parsed = new URL(urlValue);
+    const port = parsed.port ? `:${parsed.port}` : "";
+    return `${parsed.protocol}//${parsed.hostname}${port}${parsed.pathname}`;
+  } catch {
+    return "<invalid-url>";
+  }
+}
+
+function redactStringForConfigPreview(value: string): string {
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return "[REDACTED_URL]";
+  }
+  return "[REDACTED_STRING]";
+}
+
+function redactConfigValueForPreview(value: ConfigValue): ConfigValue {
+  if (typeof value === "string") return redactStringForConfigPreview(value);
+  if (Array.isArray(value)) return value.map((entry) => redactConfigValueForPreview(entry));
+  if (isConfigObject(value)) {
+    const redacted: ConfigObject = {};
+    for (const [key, entry] of Object.entries(value)) {
+      redacted[key] = isCredentialField(key) ? "[REDACTED]" : redactConfigValueForPreview(entry);
+    }
+    return redacted;
+  }
+  return value;
+}
+
+function formatConfigValueForLogs(value: ConfigValue | undefined): string {
+  if (value === undefined) return "(not set)";
+  return JSON.stringify(redactConfigValueForPreview(value));
+}
+
+async function rewriteConfigUrlsWithDnsPinning(
+  value: ConfigValue,
+  lookup: LookupFn = dnsPromises.lookup as LookupFn,
+): Promise<ConfigValue> {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const lower = trimmed.toLowerCase();
+    if (!lower.startsWith("http://") && !lower.startsWith("https://")) return value;
+
+    try {
+      const validated = await validateUrlValueWithDnsResult(trimmed, lookup);
+      if (!validated) return value;
+      // HTTP has no TLS hostname binding, so persist the DNS-pinned URL to avoid
+      // a config-time/public → runtime/private DNS-rebinding window. For HTTPS,
+      // preserve the original hostname so normal certificate validation still
+      // protects the connection.
+      return validated.protocol === "http:" ? validated.pinnedUrl : validated.originalUrl;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ConfigUrlValidationError(trimmed, message);
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((entry) => rewriteConfigUrlsWithDnsPinning(entry, lookup)));
+  }
+
+  if (isConfigObject(value)) {
+    const rewritten: ConfigObject = {};
+    for (const [key, entry] of Object.entries(value)) {
+      rewritten[key] = await rewriteConfigUrlsWithDnsPinning(entry, lookup);
+    }
+    return rewritten;
+  }
+
+  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,6 +538,42 @@ function validateUrlValue(value: string): void {
 interface ConfigGetOpts {
   key?: string | null;
   format?: string;
+}
+
+type ConfigGetParseResult =
+  | { ok: true; opts: { key: string | null; format: string } }
+  | { ok: false; errors: string[] };
+
+function configGetUsage(cliName: string): string {
+  return `  Usage: ${cliName} <name> config get [--key dotpath] [--format json|yaml]`;
+}
+
+function parseConfigGetArgs(args: string[], cliName = "nemoclaw"): ConfigGetParseResult {
+  const opts = { key: null as string | null, format: "json" };
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i];
+    if (flag === "--key") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+        return { ok: false, errors: ["  --key requires a value.", configGetUsage(cliName)] };
+      }
+      opts.key = args[++i];
+    } else if (flag === "--format") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+        return {
+          ok: false,
+          errors: ["  --format requires a value (json|yaml).", configGetUsage(cliName)],
+        };
+      }
+      const format = args[++i];
+      if (format !== "json" && format !== "yaml") {
+        return { ok: false, errors: [`  Unknown format: ${format}. Use json or yaml.`] };
+      }
+      opts.format = format;
+    } else {
+      return { ok: false, errors: [`  Unknown flag: ${flag}`, configGetUsage(cliName)] };
+    }
+  }
+  return { ok: true, opts };
 }
 
 function configGet(sandboxName: string, opts: ConfigGetOpts = {}): void {
@@ -437,19 +648,6 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
   // Parse and validate value
   const parsedValue = parseCliConfigValue(opts.value);
 
-  // Validate URLs for SSRF. validateUrlValue no-ops on non-URL input,
-  // so run it for every string to avoid bypasses via mixed-case schemes
-  // ("HTTP://127.0.0.1") or leading whitespace.
-  if (typeof parsedValue === "string") {
-    try {
-      validateUrlValue(parsedValue.trim());
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`  URL validation failed: ${message}`);
-      process.exit(1);
-    }
-  }
-
   // Check that we're not modifying the gateway section (contains auth tokens)
   if (opts.key.startsWith("gateway.") || opts.key === "gateway") {
     console.error("  Cannot modify the gateway section directly.");
@@ -461,8 +659,8 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
   const oldValue = extractDotpath(config, opts.key);
   console.log(`  Agent:     ${target.agentName}`);
   console.log(`  Key:       ${opts.key}`);
-  console.log(`  Old value: ${oldValue !== undefined ? JSON.stringify(oldValue) : "(not set)"}`);
-  console.log(`  New value: ${JSON.stringify(parsedValue)}`);
+  console.log(`  Old value: ${formatConfigValueForLogs(oldValue)}`);
+  console.log(`  New value: ${formatConfigValueForLogs(parsedValue)}`);
 
   // Refuse outright if writing this path would silently overwrite an
   // existing scalar ancestor or target an array index — setDotpath would
@@ -505,8 +703,23 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
     }
   }
 
+  // Validate URLs for SSRF (supports nested object/array values). HTTP URLs
+  // are persisted with DNS-pinned hosts so later use cannot re-resolve the same
+  // hostname to private/internal space after config-time validation succeeds.
+  let safeValue: ConfigValue;
+  try {
+    safeValue = await rewriteConfigUrlsWithDnsPinning(parsedValue);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const suffix = err instanceof ConfigUrlValidationError
+      ? ` for ${redactUrlForLogs(err.urlValue)}`
+      : "";
+    console.error(`  URL validation failed${suffix}: ${message}`);
+    process.exit(1);
+  }
+
   // Apply change
-  setDotpath(config, opts.key, parsedValue);
+  setDotpath(config, opts.key, safeValue);
 
   // Write to temp file in the agent's native format
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-config-"));
@@ -516,8 +729,7 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
   // Write config to sandbox via kubectl exec (bypasses Landlock)
   console.log(`  Writing config to sandbox (${target.configPath})...`);
   const content = fs.readFileSync(tmpFile, "utf-8");
-  execFileSync(
-    "docker",
+  dockerExecFileSync(
     [
       "exec",
       "-i",
@@ -540,8 +752,7 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
 
   // Fix ownership via kubectl exec (bypasses Landlock)
   try {
-    execFileSync(
-      "docker",
+    dockerExecFileSync(
       [
         "exec",
         K3S_CONTAINER,
@@ -618,7 +829,7 @@ async function configRotateToken(sandboxName: string, opts: RotateTokenOpts = {}
 
   // 1. Determine which provider and credentialEnv the sandbox uses.
   //    Load the onboard session and verify it matches this sandbox.
-  const { loadSession } = require("./onboard-session");
+  const { loadSession } = require("./state/onboard-session");
   const session = loadSession();
 
   if (!session || !session.credentialEnv) {
@@ -655,7 +866,7 @@ async function configRotateToken(sandboxName: string, opts: RotateTokenOpts = {}
   } else if (opts.fromStdin) {
     newToken = await readStdin();
   } else {
-    const { promptSecret } = require("./credentials");
+    const { promptSecret } = require("./credentials/store");
     newToken = await promptSecret(`  New ${credentialEnv} value: `);
   }
 
@@ -672,10 +883,11 @@ async function configRotateToken(sandboxName: string, opts: RotateTokenOpts = {}
     process.exit(1);
   }
 
-  // 4. Save credential locally
-  const { saveCredential } = require("./credentials");
+  // 4. Stage the new value in the current process so the openshell update
+  //    that follows can read it via --credential <ENV>. The OpenShell
+  //    gateway becomes the system of record once the update succeeds.
+  const { saveCredential } = require("./credentials/store");
   saveCredential(credentialEnv, newToken);
-  console.log("  Credential saved to ~/.nemoclaw/credentials.json");
 
   // 5. Update the openshell provider
   console.log("  Updating openshell provider...");
@@ -753,9 +965,16 @@ function readStdin(): Promise<string> {
  */
 function confirmYesNo(prompt: string): Promise<boolean> {
   return new Promise((resolve) => {
+    // Re-attach stdin to the event loop — unref() on exit is sticky and
+    // would otherwise leave a follow-up prompt waiting on a detached handle.
+    if (typeof process.stdin.ref === "function") process.stdin.ref();
     const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
     rl.question(prompt, (answer: string) => {
       rl.close();
+      // pause+unref so the process exits naturally after the last prompt.
+      // The matching ref() above keeps subsequent prompts working.
+      if (typeof process.stdin.pause === "function") process.stdin.pause();
+      if (typeof process.stdin.unref === "function") process.stdin.unref();
       resolve(/^y(es)?$/i.test(answer.trim()));
     });
   });
@@ -766,15 +985,22 @@ function confirmYesNo(prompt: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export {
+  DEFAULT_AGENT_CONFIG,
   configGet,
   configSet,
   configRotateToken,
+  parseConfigGetArgs,
   resolveAgentConfig,
+  readSandboxConfig,
   extractDotpath,
   setDotpath,
   validateConfigDotpath,
   findClobberingAncestor,
   classifyNewKeyGate,
   validateUrlValue,
+  validateUrlValueWithDns,
+  rewriteConfigUrlsWithDnsPinning,
+  formatConfigValueForLogs,
+  parseConfig,
   readStdin,
 };
