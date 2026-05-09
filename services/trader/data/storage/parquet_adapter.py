@@ -20,6 +20,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from services.trader.data.audit import PostgresAuditWriter
 from services.trader.data.connectors.base import ConnectorResult, HealthStatus
 from services.trader.data.storage.pit import pit_view_macro, pit_view_ohlcv
 from services.trader.data.storage.schema import (
@@ -51,6 +52,8 @@ class ParquetAdapter:
         root: Path | str,
         *,
         vault_cutoff_days: int | None = None,
+        audit_writer: PostgresAuditWriter | None = None,
+        audit_actor: str = "data-adapter",
     ) -> None:
         """Construct an adapter rooted at `root`.
 
@@ -63,12 +66,19 @@ class ParquetAdapter:
         Default is `None` (no vault enforcement) for backwards-compatibility
         with the P1.1 chunks already on main; the default flips to `180` in
         a follow-up PR (chunk V3) once existing tests are updated.
+
+        `audit_writer` (optional) is a `PostgresAuditWriter` used to record
+        each `vault_override=True` call as a hash-chained `audit.events` row
+        with `action='vault_override'`. Falls back to log-only when not
+        provided. The override path always logs a `WARNING` regardless.
         """
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         if vault_cutoff_days is not None and vault_cutoff_days < 0:
             raise ValueError(f"vault_cutoff_days must be >= 0, got {vault_cutoff_days}")
         self.vault_cutoff_days = vault_cutoff_days
+        self.audit_writer = audit_writer
+        self.audit_actor = audit_actor
 
     # --- public ----------------------------------------------------------
 
@@ -99,17 +109,33 @@ class ParquetAdapter:
         end: datetime,
         asof: datetime | None = None,
         vault_override: bool = False,
+        vault_override_reason: str | None = None,
     ) -> pd.DataFrame:
         """Return a PIT-correct DataFrame for the requested keys + window.
 
         Vault enforcement: if the adapter was constructed with
         `vault_cutoff_days`, this method raises `VaultEmbargoError` when
         `[start, end]` overlaps the vault relative to `asof`. Pass
-        `vault_override=True` to bypass with a `WARNING` log line.
-        """
-        self._enforce_vault(start=start, end=end, asof=asof, vault_override=vault_override)
+        `vault_override=True` (with `vault_override_reason`) to bypass.
 
+        When override is active:
+        - Python `logging.WARNING` line is emitted with structured fields.
+        - If an `audit_writer` was passed at construction, an
+          `action='vault_override'` row is appended to `audit.events` with
+          a payload covering the requested window + reason. Audit-write
+          failures log but do **not** suppress the read.
+        """
         keys_list = list(keys)
+        self._enforce_vault(
+            kind=kind,
+            keys=keys_list,
+            start=start,
+            end=end,
+            asof=asof,
+            vault_override=vault_override,
+            vault_override_reason=vault_override_reason,
+        )
+
         frames: list[pd.DataFrame] = []
         for key in keys_list:
             files = self._partition_files(kind, key)
@@ -132,10 +158,13 @@ class ParquetAdapter:
     def _enforce_vault(
         self,
         *,
+        kind: Kind,
+        keys: list[str],
         start: datetime,
         end: datetime,
         asof: datetime | None,
         vault_override: bool,
+        vault_override_reason: str | None,
     ) -> None:
         asof_resolved = asof or datetime.now(UTC)
         decision = assess_vault(
@@ -145,16 +174,38 @@ class ParquetAdapter:
             vault_cutoff_days=self.vault_cutoff_days,
         )
         if not decision.enforced or not decision.overlaps_vault:
+            # If override was passed but no overlap, that's harmless — silently noop.
             return
+
         if vault_override:
+            if not vault_override_reason or not vault_override_reason.strip():
+                raise ValueError(
+                    "vault_override=True requires a non-empty vault_override_reason "
+                    "documenting why the embargo is being bypassed; this is recorded "
+                    "in audit.events for forensic reconstruction."
+                )
+            cutoff_iso = (
+                decision.cutoff_dt.isoformat() if decision.cutoff_dt else "<n/a>"
+            )
             logger.warning(
                 "vault_override=True: requested window [%s, %s] overlaps vault "
-                "(cutoff %s, asof %s). Override path active; audit row written by "
-                "wired audit_writer if present (chunk V2).",
+                "(cutoff %s, asof %s); reason=%r kind=%s keys_count=%d",
                 start.isoformat(),
                 end.isoformat(),
-                decision.cutoff_dt.isoformat() if decision.cutoff_dt else "<n/a>",
+                cutoff_iso,
                 asof_resolved.isoformat(),
+                vault_override_reason,
+                kind,
+                len(keys),
+            )
+            self._record_override_audit(
+                kind=kind,
+                keys=keys,
+                start=start,
+                end=end,
+                asof=asof_resolved,
+                vault_cutoff=decision.cutoff_dt,
+                reason=vault_override_reason,
             )
             return
         assert decision.cutoff_dt is not None  # narrowed by `enforced=True`
@@ -164,6 +215,40 @@ class ParquetAdapter:
             asof=asof_resolved,
             vault_cutoff=decision.cutoff_dt,
         )
+
+    def _record_override_audit(
+        self,
+        *,
+        kind: Kind,
+        keys: list[str],
+        start: datetime,
+        end: datetime,
+        asof: datetime,
+        vault_cutoff: datetime | None,
+        reason: str,
+    ) -> None:
+        if self.audit_writer is None or not self.audit_writer.is_enabled():
+            logger.warning(
+                "vault_override audit-events row not recorded (no audit_writer wired)"
+            )
+            return
+        try:
+            self.audit_writer.write(
+                actor=self.audit_actor,
+                action="vault_override",
+                payload={
+                    "kind": kind,
+                    "keys_count": len(keys),
+                    "keys_sample": keys[:10],  # cap to keep payload bounded
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "asof": asof.isoformat(),
+                    "vault_cutoff": vault_cutoff.isoformat() if vault_cutoff else None,
+                    "reason": reason,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 (best-effort write)
+            logger.error("vault_override audit-events write failed: %s", exc)
 
     def list_partitions(self, *, kind: Kind, key: str) -> list[Path]:
         """List partition files on disk for a given key, ordered by name."""
