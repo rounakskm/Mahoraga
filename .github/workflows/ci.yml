@@ -23,13 +23,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pytest psycopg httpx
-      - name: Run unit tests (exit 5 = no tests collected, tolerated in Phase 0)
+      - name: Install project + test deps
+        run: pip install -e ".[test]"
+      - name: Run unit tests (exit 5 = no tests collected, tolerated)
         run: |
           set +e
           pytest -m "not integration" -v
           rc=$?
-          # 0 passed, 5 no-tests-collected; only integration tests exist in Phase 0
+          # 0 passed, 5 no-tests-collected (acceptable when only integration tests exist)
           if [ "$rc" -eq 0 ] || [ "$rc" -eq 5 ]; then exit 0; fi
           exit "$rc"
 
@@ -53,9 +54,10 @@ jobs:
       - name: Wait for Postgres healthcheck
         run: |
           timeout 60 bash -c 'until docker compose ps postgres | grep -q "healthy"; do sleep 2; done'
+      - name: Install project + test deps
+        run: pip install -e ".[test]"
       - name: Run Postgres migration smoke test
         run: |
-          pip install psycopg pytest
           MAHORAGA_TEST_DSN="postgresql://postgres:ci_password@localhost:5432/postgres" \
             pytest tests/integration/phase-0/test_postgres_migrations.py -v
       - name: Tear down
