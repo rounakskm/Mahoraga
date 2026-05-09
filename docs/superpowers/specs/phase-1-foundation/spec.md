@@ -61,8 +61,20 @@ Each will get its own SDD feature spec:
 - **Regime label calibration.** Hand-labels are subjective. Mitigation: calibrated against major historical events (2020 COVID, 2022 inflation, 2018 vol regime); reviewed by operator.
 - **Free-API rate limits.** Some illiquid Russell 1000 names may need slow ingestion. Mitigation: backoff + parallelism control; monitor coverage.
 
-## 8. Open Questions for This Phase
+## 8. Open Questions — resolved 2026-05-09
 
-- BTC ETF history pre-2024: spot-BTC proxy vs limit to post-2024? Decided in `data-foundation-spec.md`.
-- Macroeconomic data lag handling — CPI for Jan released mid-Feb; PIT representation. Decided in `data-foundation-spec.md`.
-- Sentiment-feature placeholder strategy until Phase 4 brings real sentiment online.
+| Question | Resolution |
+|---|---|
+| **BTC-ETF pre-2024 history** | **Deferred.** Phase 1 ingests equities + ETFs first. BTC-ETF data work is descoped to a later sub-feature inside Phase 1 (or pushed to Phase 2 if other work runs long). When we resume, the choice between (a) free 15Y-history BTCUSD API + spot-proxy stitching, (b) post-2024-only ETF history, or (c) hybrid will be made in `btc-data-spec.md` based on what free API we can actually source. Strategies that need BTC exposure pre-Jan 2024 do not run until that sub-feature lands. |
+| **Macroeconomic PIT discipline** | **Approved as proposed.** Every macro feature carries `as_of_release_date` (publication date) alongside `reference_date` (the period the value covers). The feature pipeline only uses values where `release_date <= bar_timestamp`. Enforcement lives in the storage adapter, not the strategy code — same posture as the vault embargo. The `audit-xls` reviewer prompt's look-ahead-bias check verifies this on every backtest output. |
+| **Sentiment-feature placeholder** | **Approved as proposed.** The sentiment-feature column always returns `0.0` (neutral) with a `placeholder=True` flag. Strategies that depend on sentiment must explicitly opt in via `allow_placeholder_features=True` in their config; otherwise the backtest harness rejects them at scoring time. This forces Phase 4 to deliver real sentiment before any sentiment-dependent strategy can train. |
+
+## 9. Phase 1 universe scope (revision 2026-05-09)
+
+| Asset class | Phase 1 status | Notes |
+|---|---|---|
+| US equities (S&P 500 + Russell 1000, PIT) | **In scope, primary** | First-class deliverable. 8+ years history. |
+| ETFs (broad / sector / commodity / thematic) | **In scope, primary** | First-class deliverable alongside equities. |
+| BTC ETFs (IBIT, FBTC, GBTC, BITB, ARKB) | **Deferred** | Tracked by a follow-up sub-feature spec inside Phase 1. The data work is straightforward post-2024 ETF series; the open question is how (or whether) to backfill pre-2024 from free BTCUSD spot data. |
+
+This revision changes only the *sequencing* of when BTC data work happens — the universe defined in §2 still represents the Phase 1 + Phase 5+ scope.
