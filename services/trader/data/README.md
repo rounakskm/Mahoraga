@@ -38,8 +38,8 @@ services/trader/data/
 | 1. Connector skeleton + yfinance | `phase-1-data-foundation-connectors` | Merged |
 | 2. Parquet writer + PIT view | `phase-1-data-foundation-storage` | Merged |
 | 3. FRED connector + macro schema | `phase-1-data-foundation-fred` | Merged |
-| 4. Coverage + audit-log integration | `phase-1-data-foundation-coverage` | **In review (this PR)** |
-| 5. End-to-end integration test + CI | `phase-1-data-foundation-integration` | Planned |
+| 4. Coverage + audit-log integration | `phase-1-data-foundation-coverage` | Merged |
+| 5. End-to-end integration test + CI | `phase-1-data-foundation-integration` | **In review (this PR)** |
 
 ## Storage adapter API (chunk 2)
 

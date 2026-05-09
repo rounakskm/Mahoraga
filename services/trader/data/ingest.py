@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Literal
 
@@ -134,9 +134,18 @@ class Ingest:
         end: date,
         expected_reference_dates: dict[str, pd.DatetimeIndex],
         mode: IngestMode = IngestMode.FRESH,
+        coverage_asof: datetime | None = None,
     ) -> IngestResult:
-        """Ingest macro indicators. Per-indicator coverage gated by mode."""
+        """Ingest macro indicators. Per-indicator coverage gated by mode.
+
+        `coverage_asof` controls the PIT cutoff used by the coverage check.
+        Defaults to "now" (UTC) since most callers want "given everything
+        public today, how complete is my history?". Override when running
+        synthetic dates in tests, or when intentionally checking a vintage
+        cutoff.
+        """
         threshold = THRESHOLDS[mode]
+        asof_ts = coverage_asof or datetime.now(UTC)
         with self.audit.run(source=connector.name) as run:
             rows_written = 0
             reports: list[CoverageReport] = []
@@ -161,6 +170,7 @@ class Ingest:
                     indicator=indicator,
                     expected_reference_dates=expected,
                     threshold_pct=threshold,
+                    asof=asof_ts,
                 )
                 reports.append(report)
                 if not report.passed:
