@@ -30,8 +30,17 @@ def one_call() -> float:
             "model": MODEL,
             "max_tokens": 200,
             "messages": [
-                {"role": "system", "content": "You are a senior trading-strategy researcher."},
-                {"role": "user", "content": "Propose one small parameter mutation to a momentum strategy. Reply with one sentence."},
+                {
+                    "role": "system",
+                    "content": "You are a senior trading-strategy researcher.",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Propose one small parameter mutation to a momentum "
+                        "strategy. Reply with one sentence."
+                    ),
+                },
             ],
         },
         timeout=120,
