@@ -11,6 +11,7 @@ from services.trader.data.storage.schema import (
     MacroRow,
     OhlcvRow,
 )
+from services.trader.data.storage.vault import VaultEmbargoError, assess_vault
 
 __all__ = [
     "MACRO_ARROW_SCHEMA",
@@ -18,6 +19,8 @@ __all__ = [
     "MacroRow",
     "OhlcvRow",
     "ParquetAdapter",
+    "VaultEmbargoError",
+    "assess_vault",
     "pit_view_macro",
     "pit_view_ohlcv",
 ]
