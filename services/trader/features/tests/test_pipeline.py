@@ -56,12 +56,13 @@ class TestPipelineSkeleton:
         for name, count in result.per_feature_non_null.items():
             assert count > 0, f"feature {name} produced zero non-null values"
 
-        # Read back via the store and confirm shape
+        # Read back via the store. asof defaults to datetime.now(UTC) so it
+        # is always >= fetched_at (which the pipeline sets to now() at
+        # compute-time).
         out = store.read(
             keys=["SPY"],
             start=datetime(2026, 1, 5, tzinfo=UTC),
             end=datetime(2026, 3, 31, tzinfo=UTC),
-            asof=datetime(2026, 4, 1, tzinfo=UTC),
             features=features,
         )
         assert len(out) == 60
@@ -116,7 +117,6 @@ class TestPipelineSkeleton:
             keys=["SPY"],
             start=datetime(2026, 1, 5, tzinfo=UTC),
             end=datetime(2026, 3, 31, tzinfo=UTC),
-            asof=datetime(2026, 4, 1, tzinfo=UTC),
             features=features,
         )
         # Re-run
@@ -125,7 +125,6 @@ class TestPipelineSkeleton:
             keys=["SPY"],
             start=datetime(2026, 1, 5, tzinfo=UTC),
             end=datetime(2026, 3, 31, tzinfo=UTC),
-            asof=datetime(2026, 4, 1, tzinfo=UTC),
             features=features,
         )
         # Same number of rows — dedupe on (ticker, bar_timestamp) keeps latest
