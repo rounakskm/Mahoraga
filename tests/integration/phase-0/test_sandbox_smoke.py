@@ -11,6 +11,7 @@ is deferred to Phase 1 once we have the trader bridge. For Phase 0, "alive"
 is asserted via `openshell sandbox exec` and the inference route registration.
 """
 import os
+import re
 import subprocess
 
 import pytest
@@ -18,23 +19,29 @@ import pytest
 SANDBOX = os.environ.get("MAHORAGA_SANDBOX_NAME", "mahoraga-trader")
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 @pytest.mark.integration
-def test_sandbox_status_running():
-    """`nemoclaw <name> status` reports the Mahoraga sandbox as running."""
+def test_sandbox_status_ready():
+    """`nemoclaw <name> status` reports the Mahoraga sandbox as Ready."""
     out = subprocess.run(
         ["nemoclaw", SANDBOX, "status"],
         capture_output=True, text=True, timeout=30,
     )
     assert out.returncode == 0, f"nemoclaw status failed: {out.stderr}"
-    text = (out.stdout + out.stderr).lower()
-    assert "running" in text, f"unexpected status output: {out.stdout!r}"
+    plain = _ANSI_RE.sub("", out.stdout + out.stderr).lower()
+    assert re.search(r"phase:\s+ready", plain), (
+        f"sandbox not Ready in status output: {out.stdout!r}"
+    )
 
 
 @pytest.mark.integration
 def test_sandbox_exec_responds():
     """`openshell sandbox exec` runs a no-op command inside the sandbox within 30s."""
     out = subprocess.run(
-        ["openshell", "sandbox", "exec", SANDBOX, "--", "echo", "phase0-ok"],
+        ["openshell", "sandbox", "exec", "--name", SANDBOX,
+         "--no-tty", "--", "echo", "phase0-ok"],
         capture_output=True, text=True, timeout=30,
     )
     assert out.returncode == 0, f"sandbox exec failed: {out.stderr}"
