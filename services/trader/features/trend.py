@@ -80,6 +80,13 @@ class SMA(Feature):
 
 
 class ADX(Feature):
+    """Average Directional Index (Wilder).
+
+    Implements the canonical Wilder ADX using `ewm(alpha=1/window,
+    adjust=False)` smoothing, the widely-used approximation of Wilder's
+    running-sum smoother. Result is bounded to [0, 100] by construction.
+    """
+
     category = "trend"
 
     def __init__(self, window: int = 14) -> None:
@@ -87,52 +94,31 @@ class ADX(Feature):
         self.name = f"adx_{self.window}"
 
     def required_history_bars(self) -> int:
-        return 2 * self.window  # ADX needs window for DI smoothing + window for ADX smoothing
+        return 2 * self.window  # window for DI smoothing + window for ADX smoothing
 
     def compute(self, ctx: FeatureContext) -> pd.Series:
         high, low, close = _high_low_close(ctx)
-        plus_dm = (high.diff()).clip(lower=0.0)
-        minus_dm = (-low.diff()).clip(lower=0.0)
-        # Where +DM <= -DM, +DM is zeroed (and vice versa)
-        plus_dm = plus_dm.where(plus_dm > minus_dm, 0.0)
-        minus_dm = minus_dm.where(minus_dm > plus_dm.where(plus_dm > 0, 0.0).shift(0), minus_dm)
-        # Simpler restatement matching the canonical Wilder ADX:
-        plus_dm = (high.diff().where(high.diff() > -low.diff(), 0.0)).clip(lower=0.0)
-        minus_dm = ((-low.diff()).where((-low.diff()) > high.diff(), 0.0)).clip(lower=0.0)
+        prev_close = close.shift(1)
+
+        up_move = high.diff()
+        down_move = -low.diff()
+        plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0).fillna(0.0)
+        minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0).fillna(0.0)
 
         tr = pd.concat(
-            [
-                high - low,
-                (high - close.shift()).abs(),
-                (low - close.shift()).abs(),
-            ],
+            [high - low, (high - prev_close).abs(), (low - prev_close).abs()],
             axis=1,
         ).max(axis=1)
 
-        atr = _wilders_smoothing(tr, self.window)
-        plus_di = 100.0 * _wilders_smoothing(plus_dm, self.window) / atr.replace(0.0, np.nan)
-        minus_di = 100.0 * _wilders_smoothing(minus_dm, self.window) / atr.replace(0.0, np.nan)
-        dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0.0, np.nan)
-        return _wilders_smoothing(dx, self.window)
+        alpha = 1.0 / self.window
+        atr = tr.ewm(alpha=alpha, adjust=False).mean()
+        atr_safe = atr.replace(0.0, np.nan)
+        plus_di = 100.0 * plus_dm.ewm(alpha=alpha, adjust=False).mean() / atr_safe
+        minus_di = 100.0 * minus_dm.ewm(alpha=alpha, adjust=False).mean() / atr_safe
 
-
-def _wilders_smoothing(series: pd.Series, window: int) -> pd.Series:
-    """Wilder's smoothing — equivalent to `ewm(alpha=1/window, adjust=False)` after the
-    first window's seed.
-    """
-    s = series.copy()
-    seed = s.iloc[: window].sum()
-    out = pd.Series(np.nan, index=s.index, dtype="float64")
-    if len(s) <= window:
-        return out
-    out.iloc[window - 1] = seed
-    factor = (window - 1) / window
-    for i in range(window, len(s)):
-        prev = out.iloc[i - 1]
-        if pd.isna(prev):
-            continue
-        out.iloc[i] = prev * factor + (s.iloc[i] if not pd.isna(s.iloc[i]) else 0.0)
-    return out
+        di_sum = (plus_di + minus_di).replace(0.0, np.nan)
+        dx = 100.0 * (plus_di - minus_di).abs() / di_sum
+        return dx.ewm(alpha=alpha, adjust=False).mean()
 
 
 # ---------------------------------------------------------------------------

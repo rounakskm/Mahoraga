@@ -29,7 +29,7 @@ def synthetic_ohlcv(
     opens = closes - rng.normal(0.0, 0.5, size=bars)
     volumes = rng.integers(800_000, 1_200_000, size=bars).astype("int64")
 
-    return pd.DataFrame(
+    df = pd.DataFrame(
         {
             "ticker":        ticker,
             "bar_timestamp": pd.to_datetime(timestamps, utc=True),
@@ -44,6 +44,10 @@ def synthetic_ohlcv(
             "revision_at":   pd.NaT,
         }
     )
+    # Match the storage conftest: coerce both nullable-timestamp columns to UTC.
+    df["fetched_at"] = pd.to_datetime(df["fetched_at"], utc=True)
+    df["revision_at"] = pd.to_datetime(df["revision_at"], utc=True)
+    return df
 
 
 def make_ctx(
