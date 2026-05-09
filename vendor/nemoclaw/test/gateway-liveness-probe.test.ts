@@ -18,18 +18,25 @@ describe("gateway liveness probe (#2020)", () => {
   const content = fs.readFileSync(path.join(ROOT, "src/lib/onboard.ts"), "utf-8");
 
   it("verifyGatewayContainerRunning() helper exists and checks Docker state", () => {
-    expect(content).toContain("function verifyGatewayContainerRunning()");
-    // Must use docker inspect to probe container state
-    expect(content).toContain("docker inspect --type container");
+    const match = content.match(/function verifyGatewayContainerRunning\([\s\S]*?^}/m);
+    expect(match).toBeTruthy();
+    if (!match) throw new Error("Expected verifyGatewayContainerRunning() in src/lib/onboard.ts");
+    // Must use a Docker inspect helper to probe container state
+    expect(match[0]).toMatch(/docker(?:Inspect|ContainerInspectFormat)\(/);
     // Must check .State.Running, not just container existence
-    expect(content).toContain("{{.State.Running}}");
+    expect(match[0]).toContain("{{.State.Running}}");
   });
 
   it("preflight probes the container when gatewayReuseState is 'healthy'", () => {
     // The preflight section must call the probe before entering the port loop.
-    // Find the first gatewayReuseState assignment and the port loop.
-    const preflightProbe = content.match(
-      /let gatewayReuseState = getGatewayReuseState[\s\S]*?verifyGatewayContainerRunning\(\)[\s\S]*?gatewayReuseState = "missing"/,
+    // Scope to preflight so the regex can't accidentally match the main onboard block.
+    const preflightStart = content.indexOf("async function preflight(");
+    const preflightEnd = content.indexOf("async function startGatewayWithOptions(");
+    expect(preflightStart).toBeGreaterThanOrEqual(0);
+    expect(preflightEnd).toBeGreaterThan(preflightStart);
+    const preflightSection = content.slice(preflightStart, preflightEnd);
+    const preflightProbe = preflightSection.match(
+      /let gatewayReuseState = gatewaySnapshot\.gatewayReuseState[\s\S]*?verifyGatewayContainerRunning\(\)[\s\S]*?gatewayReuseState = "missing"/,
     );
     expect(preflightProbe).toBeTruthy();
   });
@@ -39,7 +46,7 @@ describe("gateway liveness probe (#2020)", () => {
     // Scope to the onboard() function so the regex can't accidentally match the preflight block.
     const onboardSection = content.slice(content.indexOf("async function onboard("));
     const mainFlowProbe = onboardSection.match(
-      /let gatewayReuseState = getGatewayReuseState[\s\S]*?verifyGatewayContainerRunning\(\)[\s\S]*?const canReuseHealthyGateway/,
+      /let gatewayReuseState = gatewaySnapshot\.gatewayReuseState[\s\S]*?verifyGatewayContainerRunning\(\)[\s\S]*?const canReuseHealthyGateway/,
     );
     expect(mainFlowProbe).toBeTruthy();
   });
@@ -70,16 +77,16 @@ describe("gateway liveness probe (#2020)", () => {
     expect(cleanupAfterProbe).toBeTruthy();
   });
 
-  it("does not modify isGatewayHealthy() in gateway-state.ts", () => {
+  it("does not modify isGatewayHealthy() in src/lib/state/gateway.ts", () => {
     // isGatewayHealthy() must remain a pure function — no I/O.
     // Scope the check to the function body so unrelated helpers don't cause false failures.
-    const gsContent = fs.readFileSync(path.join(ROOT, "src/lib/gateway-state.ts"), "utf-8");
+    const gsContent = fs.readFileSync(path.join(ROOT, "src/lib/state/gateway.ts"), "utf-8");
     const fnMatch = gsContent.match(
       /(?:function isGatewayHealthy|const isGatewayHealthy\b)[\s\S]*?\n\}/,
     );
     expect(fnMatch).toBeTruthy();
     if (!fnMatch) {
-      throw new Error("Expected isGatewayHealthy() in src/lib/gateway-state.ts");
+      throw new Error("Expected isGatewayHealthy() in src/lib/state/gateway.ts");
     }
     const fnBody = fnMatch[0];
     expect(fnBody).not.toContain("docker");
