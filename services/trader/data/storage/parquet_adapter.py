@@ -47,25 +47,30 @@ class ParquetAdapter:
     re-runs and lets restatements coexist with originals.
     """
 
+    DEFAULT_VAULT_CUTOFF_DAYS = 180
+
     def __init__(
         self,
         root: Path | str,
         *,
-        vault_cutoff_days: int | None = None,
+        vault_cutoff_days: int | None = DEFAULT_VAULT_CUTOFF_DAYS,
         audit_writer: PostgresAuditWriter | None = None,
         audit_actor: str = "data-adapter",
     ) -> None:
         """Construct an adapter rooted at `root`.
 
         `vault_cutoff_days` enables vault-embargo enforcement on every read:
-        when set, any `read()` whose `[start, end]` overlaps the most-recent
-        `vault_cutoff_days` days (relative to the call's `asof`) raises
-        `VaultEmbargoError`. Pass `vault_override=True` on the call site to
-        bypass with a `WARNING` log.
+        when set (the **default 180**, i.e. roughly 6 months), any `read()`
+        whose `[start, end]` overlaps the most-recent `vault_cutoff_days`
+        days (relative to the call's `asof`) raises `VaultEmbargoError`.
+        Pass `vault_override=True` along with a non-empty
+        `vault_override_reason` on the call site to bypass with a `WARNING`
+        log line and a `vault_override` row in `audit.events` (when an
+        `audit_writer` is wired).
 
-        Default is `None` (no vault enforcement) for backwards-compatibility
-        with the P1.1 chunks already on main; the default flips to `180` in
-        a follow-up PR (chunk V3) once existing tests are updated.
+        Pass `vault_cutoff_days=None` to disable enforcement for use cases
+        that legitimately need to read into the vault (e.g. backfill jobs,
+        synthetic-data tests). The disabled mode is opt-in.
 
         `audit_writer` (optional) is a `PostgresAuditWriter` used to record
         each `vault_override=True` call as a hash-chained `audit.events` row

@@ -50,7 +50,7 @@ def _make_audit(tmp_path: Path) -> AuditLogger:
 
 class TestRunOhlcvFresh:
     def test_full_coverage_succeeds(self, tmp_path: Path) -> None:
-        adapter = ParquetAdapter(tmp_path / "parquet")
+        adapter = ParquetAdapter(tmp_path / "parquet", vault_cutoff_days=None)
         audit = _make_audit(tmp_path / "parquet")
         expected = pd.DatetimeIndex(
             ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09"],
@@ -75,7 +75,7 @@ class TestRunOhlcvFresh:
         assert result.failures == []
 
     def test_below_threshold_raises_after_audit(self, tmp_path: Path) -> None:
-        adapter = ParquetAdapter(tmp_path / "parquet")
+        adapter = ParquetAdapter(tmp_path / "parquet", vault_cutoff_days=None)
         audit = _make_audit(tmp_path / "parquet")
         expected = pd.DatetimeIndex(
             ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09"],
@@ -110,7 +110,7 @@ class TestRunOhlcvFresh:
 
 class TestRunOhlcvBackfill:
     def test_below_99_above_95_warns_does_not_raise(self, tmp_path: Path) -> None:
-        adapter = ParquetAdapter(tmp_path / "parquet")
+        adapter = ParquetAdapter(tmp_path / "parquet", vault_cutoff_days=None)
         audit = _make_audit(tmp_path / "parquet")
         # 19 expected days; provide 18 -> ~94.7% (below backfill threshold 95%)
         # Actually: provide 19 - 1 = 18 → 94.7%; provide 19 → 100%; tune to 96%
@@ -139,7 +139,7 @@ class TestConnectorFailure:
     def test_connector_error_recorded_then_continues(self, tmp_path: Path) -> None:
         from services.trader.data.connectors.yfinance import _PermanentError
 
-        adapter = ParquetAdapter(tmp_path / "parquet")
+        adapter = ParquetAdapter(tmp_path / "parquet", vault_cutoff_days=None)
         audit = _make_audit(tmp_path / "parquet")
 
         def fake(**kwargs: object) -> pd.DataFrame:

@@ -154,7 +154,11 @@ class TestEndToEnd:
     def test_full_data_path_writes_parquet_manifest_and_audit(
         self, parquet_root: Path, audit_logger: AuditLogger
     ) -> None:
-        adapter = ParquetAdapter(parquet_root)
+        # Vault opt-out: this end-to-end uses 2026 dates and the default
+        # 180-day vault would false-positive. The Phase 1 vault is exercised
+        # in dedicated tests under storage/tests/test_vault.py and
+        # tests/integration/phase-1/data_foundation/test_vault_audit.py.
+        adapter = ParquetAdapter(parquet_root, vault_cutoff_days=None)
         ingest = Ingest(adapter=adapter, audit=audit_logger)
 
         # snapshot pre-state of audit.events so we can isolate our rows

@@ -20,7 +20,9 @@ from services.trader.data.storage import ParquetAdapter
 
 @pytest.fixture
 def adapter(tmp_path: Path) -> ParquetAdapter:
-    return ParquetAdapter(tmp_path)
+    # Coverage tests use 2026 dates; opt out of vault enforcement so the
+    # default 180-day cutoff doesn't false-positive.
+    return ParquetAdapter(tmp_path, vault_cutoff_days=None)
 
 
 def _result(frame: pd.DataFrame, source: str = "yfinance") -> ConnectorResult:

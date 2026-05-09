@@ -140,16 +140,18 @@ The orchestrator:
 
 ## Vault embargo (P1.3)
 
-`ParquetAdapter` enforces a rolling embargo over the most recent N days
-when `vault_cutoff_days` is set:
+`ParquetAdapter` enforces a rolling 180-day embargo by default. The most
+recent 6 months are held back from training so that the live deployment
+in Phase 7+ has a genuinely out-of-sample window to validate against.
 
 ```python
 from services.trader.data.audit import PostgresAuditWriter
 from services.trader.data.storage import ParquetAdapter, VaultEmbargoError
 
+# Default: 180-day vault enforced. Wire an audit_writer if you want
+# every override forensically reconstructible (recommended in production).
 adapter = ParquetAdapter(
     "data/parquet",
-    vault_cutoff_days=180,
     audit_writer=PostgresAuditWriter(dsn=os.environ["MAHORAGA_AUDIT_DSN"]),
     audit_actor="trader-backtest",
 )
@@ -175,8 +177,15 @@ adapter.read(
 )
 ```
 
-The default `vault_cutoff_days=None` (no enforcement) is preserved for
-back-compat with the P1.1 chunks; chunk V3 will flip that to 180.
+**Opt-out**: pass `vault_cutoff_days=None` for use cases that legitimately
+need vault-window reads (backfill jobs, synthetic-data fixtures, tests
+exercising storage mechanics rather than vault policy). Production
+strategy code should never pass `None`.
+
+```python
+# Backfill job — explicit opt-out, documented in the call site
+adapter = ParquetAdapter("data/parquet", vault_cutoff_days=None)
+```
 
 ## Substrate-portability discipline
 
