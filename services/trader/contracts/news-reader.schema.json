@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mahoraga.trader/contracts/news-reader.schema.json",
+  "title": "News reader output (untrusted-input → headline+source)",
+  "description": "Adapted from anthropics/financial-services @ 1c2ece3467c3434ddd01e655970e35b773940a29 — managed-agent-cookbooks/meeting-prep-agent/subagents/news-reader.yaml. Apache 2.0 (preserved). Adapted 2026-05-09 for Mahoraga: this becomes the contract for the Phase-4 news-classifier leaf-worker. Inputs are UNTRUSTED news articles, RSS bodies, or social-media posts; output is a bounded list of (headline, source) pairs that downstream classifiers can label for sentiment / event-type / regime impact.",
+  "type": "object",
+  "required": ["items"],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "headline": { "type": "string", "maxLength": 200, "pattern": "^[A-Za-z0-9 .,%$()_/:-]+$" },
+          "source":   { "type": "string", "maxLength": 64,  "pattern": "^[A-Za-z0-9 ._/:-]+$" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mahoraga.trader/contracts/sector-reader.schema.json",
+  "title": "Sector reader output (claim + source)",
+  "description": "Adapted from anthropics/financial-services @ 1c2ece3467c3434ddd01e655970e35b773940a29 — managed-agent-cookbooks/market-researcher/subagents/sector-reader.yaml. Apache 2.0 (preserved). Adapted 2026-05-09 for Mahoraga: a Researcher leaf-worker that ingests UNTRUSTED third-party reports or issuer materials and returns claim/source pairs only. The (claim, source) pairing enforces our no-unsourced-numbers discipline at the contract layer rather than relying on prompt instructions alone.",
+  "type": "object",
+  "required": ["sector", "facts"],
+  "additionalProperties": false,
+  "properties": {
+    "sector": { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9 &/._-]+$" },
+    "facts": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["claim", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "claim":  { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9 .,%$()_/&:-]+$" },
+          "source": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z0-9 .,_/:-]+$" }
+        }
+      }
+    }
+  }
+}
