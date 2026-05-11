@@ -25,24 +25,28 @@ services/trader/backtest/
 └── tests/             per-component unit tests
 ```
 
-## Usage (B1 — Strategy ABC + stub only)
+## Usage
 
 ```python
-from services.trader.backtest import (
-    BuyAndHold, FitnessReport, Strategy, validate_strategy,
-)
-from services.trader.features import BUILTIN_FEATURES
+from services.trader.backtest import Backtest, BuyAndHold
+from services.trader.data.storage import ParquetAdapter
+from services.trader.features.store import FeatureStore
+from services.trader.regime.store import RegimeStore
 
-strategy = BuyAndHold()
-validate_strategy(strategy, builtin_features=BUILTIN_FEATURES)
-signals = strategy.generate_signals(
-    feature_frame=feature_df,
-    regime_frame=regime_df,
+bt = Backtest(
+    feature_store=FeatureStore("data/parquet"),
+    regime_store=RegimeStore("data/parquet"),
+    ohlcv_adapter=ParquetAdapter("data/parquet"),
 )
+report = bt.run(
+    strategy=BuyAndHold(),
+    universe=["SPY", "QQQ"],
+    start=date(2024, 1, 1),
+    end=date(2025, 12, 31),
+)
+print(report.total_return, report.sharpe, report.max_drawdown)
+print(report.per_regime["trending_low_vol"])  # {"return": ..., "sharpe": ..., "n_bars": ...}
 ```
-
-B2 adds the `Backtest` orchestrator that consumes those signals,
-applies risk limits, and returns a `FitnessReport`.
 
 ## Placeholder-feature gate (P1.4 §6)
 
@@ -57,8 +61,8 @@ a placeholder.
 
 | Chunk | Branch | Status |
 |---|---|---|
-| B1. Skeleton + BuyAndHold | `phase-1-backtest-skeleton` | **In review (this PR)** |
-| B2. Engine + risk-limit firewall | `phase-1-backtest-engine-and-risk` | Planned |
+| B1. Skeleton + BuyAndHold | `phase-1-backtest-skeleton` | Merged |
+| B2. Engine + risk-limit firewall | `phase-1-backtest-engine-and-risk` | **In review (this PR)** |
 | B3. End-to-end integration (closes Phase 1) | `phase-1-backtest-integration` | Planned |
 
 ## Substrate-portability

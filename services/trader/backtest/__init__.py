@@ -13,9 +13,11 @@ from services.trader.backtest.base import (
     Strategy,
     validate_strategy,
 )
+from services.trader.backtest.engine import Backtest
 from services.trader.backtest.strategies import BuyAndHold
 
 __all__ = [
+    "Backtest",
     "BuyAndHold",
     "FitnessReport",
     "PlaceholderFeatureError",
