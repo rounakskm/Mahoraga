@@ -20,6 +20,7 @@ from services.trader.regime.base import (
 from services.trader.regime.detector import RegimeDetector
 from services.trader.regime.macro import MacroLens
 from services.trader.regime.meso import MesoLens
+from services.trader.regime.store import RegimeStore
 
 __all__ = [
     "ClassificationResult",
@@ -29,4 +30,5 @@ __all__ = [
     "MesoLens",
     "RegimeDetector",
     "RegimeRunResult",
+    "RegimeStore",
 ]
