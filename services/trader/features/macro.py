@@ -66,12 +66,18 @@ def _join_macro_to_bars(
         return pd.Series([np.nan] * len(bars), dtype="float64")
 
     m = macro.copy()
-    m["as_of_release_dt"] = pd.to_datetime(m["as_of_release_date"], utc=True)
+    # Convert + force microsecond precision so both sides of merge_asof match
+    # bar_timestamp's `datetime64[us, UTC]` dtype. Without the explicit cast,
+    # pandas 2.x infers `[s, UTC]` from `date` inputs and rejects the merge.
+    m["as_of_release_dt"] = (
+        pd.to_datetime(m["as_of_release_date"], utc=True).astype("datetime64[us, UTC]")
+    )
     m = m.sort_values("as_of_release_dt").reset_index(drop=True)
 
-    # Build the left side with tz-aware bar_timestamp; `.values` would strip
-    # the timezone and cause pd.merge_asof to reject the dtype mismatch.
-    bars_df = pd.DataFrame({"bar_timestamp": pd.to_datetime(bars, utc=True)})
+    # Build the left side with tz-aware microsecond-precision bar_timestamp.
+    bars_df = pd.DataFrame(
+        {"bar_timestamp": pd.to_datetime(bars, utc=True).astype("datetime64[us, UTC]")}
+    )
     bars_df = bars_df.sort_values("bar_timestamp").reset_index()
     merged = pd.merge_asof(
         bars_df,
@@ -292,11 +298,14 @@ def _join_ohlcv_to_bars(ohlcv: pd.DataFrame, bars: pd.Series) -> pd.Series:
     if ohlcv is None or ohlcv.empty or len(bars) == 0:
         return pd.Series([np.nan] * len(bars), dtype="float64")
 
-    o = ohlcv.sort_values("bar_timestamp").reset_index(drop=True)
-    # Preserve the tz on bar_timestamp (Series.values strips tz on numpy arrays
-    # and pd.merge_asof rejects the dtype mismatch).
+    o = ohlcv.sort_values("bar_timestamp").reset_index(drop=True).copy()
+    # Force microsecond precision on both sides so pd.merge_asof is happy
+    # regardless of how the OHLCV producer constructed its timestamps.
+    o["bar_timestamp"] = pd.to_datetime(o["bar_timestamp"], utc=True).astype(
+        "datetime64[us, UTC]"
+    )
     bars_df = pd.DataFrame(
-        {"bar_timestamp": pd.to_datetime(bars, utc=True)}
+        {"bar_timestamp": pd.to_datetime(bars, utc=True).astype("datetime64[us, UTC]")}
     ).reset_index()
     bars_df = bars_df.sort_values("bar_timestamp")
     merged = pd.merge_asof(
