@@ -7,6 +7,7 @@ See `docs/superpowers/specs/phase-1-foundation/feature-pipeline-spec.md`.
 # Tests that want only a specific category pass an explicit `features=[...]`
 # kwarg to FeaturePipeline rather than relying on the default registry.
 from services.trader.features import (
+    macro,  # noqa: F401, E402
     momentum,  # noqa: F401, E402
     statistical,  # noqa: F401, E402
     trend,  # noqa: F401, E402

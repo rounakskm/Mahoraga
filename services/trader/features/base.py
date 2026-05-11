@@ -36,6 +36,7 @@ class FeatureContext:
     frame: pd.DataFrame                       # OHLCV with bar_timestamp index, sorted ascending
     asof: datetime                            # PIT cutoff for any macro lookups
     macro_fetcher: Callable[[str], pd.DataFrame] | None = None
+    ohlcv_fetcher: Callable[[str], pd.DataFrame] | None = None  # for cross-ticker features
 
 
 class Feature(ABC):
