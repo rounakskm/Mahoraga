@@ -19,9 +19,9 @@ services/trader/features/
 ├── base.py            Feature ABC + FeatureContext + registry + Arrow schema helpers
 ├── pipeline.py        FeaturePipeline orchestrator (read OHLCV → compute → write)
 ├── store.py           FeatureStore parquet I/O with PIT view + vault enforcement
-├── trend.py           Trend-category Feature implementations (chunk F1)
-├── momentum.py        Momentum-category (chunk F2, planned)
-├── volatility.py      Volatility-category (chunk F2, planned)
+├── trend.py           Trend-category Feature implementations (10 features)
+├── momentum.py        Momentum-category (10 features)
+├── volatility.py      Volatility-category (10 features)
 ├── volume.py          Volume-category (chunk F3, planned)
 ├── statistical.py     Statistical-category (chunk F3, planned)
 ├── macro.py           Macro features w/ PIT macro fetch (chunk F4, planned)
@@ -70,8 +70,8 @@ df = store.read(
 
 | Chunk | Branch | Status |
 |---|---|---|
-| F1. Skeleton + 10 trend features | `phase-1-features-skeleton` | **In review (this PR)** |
-| F2. Momentum + volatility | `phase-1-features-momentum-volatility` | Planned |
+| F1. Skeleton + 10 trend features | `phase-1-features-skeleton` | Merged |
+| F2. Momentum + volatility (20 features) | `phase-1-features-momentum-volatility` | **In review (this PR)** |
 | F3. Volume + statistical | `phase-1-features-volume-statistical` | Planned |
 | F4. Macro | `phase-1-features-macro` | Planned |
 | F5. Sentiment placeholder + coverage + audit | `phase-1-features-sentiment-and-coverage` | Planned |
