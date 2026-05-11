@@ -1,10 +1,13 @@
-"""Regime detector orchestrator (in-memory skeleton for R1).
+"""Regime detector orchestrator.
 
 Reads pre-computed feature rows + (optional) macro rows at `asof`,
-dispatches to every registered `Lens`, composes the per-bar result.
+dispatches to every registered `Lens`, composes the per-bar result,
+and (when configured) persists to a `RegimeStore` + emits manifest +
+hash-chained `audit.events` rows.
 
-R1 ships the in-memory shape only — no `RegimeStore`, no manifest /
-audit. R3 wires those.
+R1 shipped the in-memory dispatch. R3 wires storage / manifest / audit
+through the same `IngestRun` shape the data foundation + feature
+pipeline use.
 """
 
 from __future__ import annotations
@@ -16,12 +19,18 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
+from services.trader.data.audit import (
+    IngestRun,
+    ManifestWriter,
+    PostgresAuditWriter,
+)
 from services.trader.regime.base import (
     ClassificationResult,
     CompositeRegime,
     Lens,
     RegimeRunResult,
 )
+from services.trader.regime.store import RegimeStore, encode_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +40,9 @@ DETECTOR_SOURCE = "regime-detector"
 class RegimeDetector:
     """Orchestrate one regime classification over a span of bars.
 
-    Phase 1 R1: pure in-memory dispatch. The caller supplies a
-    `feature_frame` (one row per bar, columns include every
-    `lens.required_features()`) and optionally a `macro_frame`
-    aligned by `asof`. R3 adds the feature-store / macro-adapter
-    reads + storage / audit.
+    Phase 1 R3: in-memory dispatch + optional storage / manifest /
+    audit. The caller still supplies `feature_frame` + `macro_frame`
+    (R4 wires the live `FeatureStore` + `ParquetAdapter` reads).
     """
 
     def __init__(
@@ -43,11 +50,19 @@ class RegimeDetector:
         *,
         lenses: list[Lens],
         run_id: str | None = None,
+        store: RegimeStore | None = None,
+        manifest_root: str | None = None,
+        audit_writer: PostgresAuditWriter | None = None,
+        audit_actor: str = "regime-detector",
     ) -> None:
         if not lenses:
             raise ValueError("RegimeDetector requires at least one Lens")
         self.lenses = list(lenses)
         self.run_id = run_id or str(uuid.uuid4())
+        self.store = store
+        self.manifest_writer = ManifestWriter(manifest_root) if manifest_root else None
+        self.audit_writer = audit_writer
+        self.audit_actor = audit_actor
 
     def classify(
         self,
@@ -73,6 +88,20 @@ class RegimeDetector:
             rows.append(self._compose(results))
 
         finished_at = datetime.now(UTC)
+        rows_written = self._persist(
+            scope=scope,
+            feature_frame=feature_frame,
+            rows=rows,
+            inputs_by_bar=inputs_by_bar,
+            fetched_at=finished_at,
+        )
+        self._finalize_audit(
+            started_at=started_at,
+            finished_at=finished_at,
+            scope=scope,
+            rows_written=rows_written,
+            failures=failures,
+        )
         return RegimeRunResult(
             run_id=self.run_id,
             started_at=started_at,
@@ -82,6 +111,109 @@ class RegimeDetector:
             inputs_by_bar=inputs_by_bar,
             failures=failures,
         )
+
+    # --- persistence ----------------------------------------------------
+
+    def _persist(
+        self,
+        *,
+        scope: str,
+        feature_frame: pd.DataFrame,
+        rows: list[CompositeRegime],
+        inputs_by_bar: list[dict[str, float]],
+        fetched_at: datetime,
+    ) -> int:
+        if self.store is None or not rows:
+            return 0
+        try:
+            frame = self._build_storage_frame(
+                scope=scope,
+                feature_frame=feature_frame,
+                rows=rows,
+                inputs_by_bar=inputs_by_bar,
+                fetched_at=fetched_at,
+            )
+            return self.store.write(
+                frame, lens_names=[lens.name for lens in self.lenses]
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("RegimeStore write failed: %s", exc)
+            return 0
+
+    def _build_storage_frame(
+        self,
+        *,
+        scope: str,
+        feature_frame: pd.DataFrame,
+        rows: list[CompositeRegime],
+        inputs_by_bar: list[dict[str, float]],
+        fetched_at: datetime,
+    ) -> pd.DataFrame:
+        out = pd.DataFrame(
+            {
+                "scope": [scope] * len(rows),
+                "asof": pd.to_datetime(
+                    feature_frame.reset_index(drop=True)["bar_timestamp"], utc=True
+                ).reset_index(drop=True),
+            }
+        )
+        for lens in self.lenses:
+            label_col = f"{lens.name}_label"
+            conf_col = f"{lens.name}_conf"
+            out[label_col] = [getattr(r, lens.name, "undefined") for r in rows]
+            out[conf_col] = [
+                getattr(r, f"{lens.name}_conf", 0.0) for r in rows
+            ]
+        out["composite_conf"] = [r.composite_conf for r in rows]
+        out["inputs"] = [encode_inputs(s) for s in inputs_by_bar]
+        out["source"] = DETECTOR_SOURCE
+        out["fetched_at"] = pd.Timestamp(fetched_at)
+        return out
+
+    def _finalize_audit(
+        self,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        scope: str,
+        rows_written: int,
+        failures: list[str],
+    ) -> None:
+        if self.manifest_writer is not None:
+            try:
+                self.manifest_writer.append(
+                    IngestRun(
+                        run_id=self.run_id,
+                        source=DETECTOR_SOURCE,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        rows_written=rows_written,
+                        coverage_pct=None,
+                        errors=list(failures),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("regime manifest write failed: %s", exc)
+
+        if self.audit_writer is not None and self.audit_writer.is_enabled():
+            try:
+                self.audit_writer.write(
+                    actor=self.audit_actor,
+                    action="classify",
+                    payload={
+                        "run_id": self.run_id,
+                        "source": DETECTOR_SOURCE,
+                        "scope": scope,
+                        "started_at": started_at.isoformat(),
+                        "finished_at": finished_at.isoformat(),
+                        "rows_written": rows_written,
+                        "lens_count": len(self.lenses),
+                        "lens_names": [lens.name for lens in self.lenses],
+                        "errors": failures,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("regime audit-events write failed: %s", exc)
 
     # --- internals ------------------------------------------------------
 
@@ -113,9 +245,6 @@ class RegimeDetector:
         macro_label = macro.label if macro else "undefined"
         meso_conf = meso.confidence if meso else 0.0
         macro_conf = macro.confidence if macro else 0.0
-        # Composite = min of present lenses; if MACRO is absent (R1
-        # ships MESO only), composite collapses to MESO confidence so
-        # the R1 in-memory path is testable end-to-end.
         present = [r.confidence for r in (meso, macro) if r is not None]
         composite_conf = min(present) if present else 0.0
         return CompositeRegime(
@@ -131,9 +260,6 @@ class RegimeDetector:
     ):  # type: ignore[no-untyped-def]
         if macro_frame is None or macro_frame.empty:
             return lambda _ts: None
-        # Build a (bar_timestamp -> row) index keyed by UTC-normalized
-        # timestamp; lookup falls back to the latest row at-or-before
-        # the requested bar.
         if "bar_timestamp" not in macro_frame.columns:
             return lambda _ts: None
         ordered = macro_frame.sort_values("bar_timestamp").reset_index(drop=True)
@@ -151,8 +277,6 @@ class RegimeDetector:
             mask = (timestamps <= target).to_numpy()
             if not mask.any():
                 return None
-            # timestamps is sorted ascending → mask is a True-prefix,
-            # so the last True position is at index `mask.sum() - 1`.
             return ordered.iloc[int(mask.sum()) - 1]
 
         return lookup

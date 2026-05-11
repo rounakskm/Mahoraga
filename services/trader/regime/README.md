@@ -19,16 +19,26 @@ services/trader/regime/
 ├── base.py            Lens ABC + ClassificationResult + CompositeRegime dataclasses
 ├── meso.py            MesoLens (rule-based, ADX × realized_vol_pct_60)
 ├── macro.py           MacroLens (rule-based, yield_2s10s + vix_level + dxy_change_20d)
-├── detector.py        RegimeDetector orchestrator (in-memory; R3 adds storage)
-└── tests/             per-lens + detector + composite unit tests
+├── detector.py        RegimeDetector orchestrator (storage + manifest + audit)
+├── store.py           RegimeStore parquet I/O with PIT view + vault enforcement
+└── tests/             per-lens + detector + store + composite unit tests
 ```
 
 ## Usage (R1 — in-memory only)
 
 ```python
-from services.trader.regime import RegimeDetector, MesoLens, MacroLens
+from services.trader.regime import (
+    MacroLens, MesoLens, RegimeDetector, RegimeStore,
+)
+from services.trader.data.audit import PostgresAuditWriter
 
-detector = RegimeDetector(lenses=[MesoLens(), MacroLens()])
+store = RegimeStore("data/parquet", vault_cutoff_days=180)
+detector = RegimeDetector(
+    lenses=[MesoLens(), MacroLens()],
+    store=store,
+    manifest_root="data/parquet",
+    audit_writer=PostgresAuditWriter(dsn=os.environ.get("MAHORAGA_AUDIT_DSN")),
+)
 result = detector.classify(
     scope="universe",
     feature_frame=feature_df,
@@ -79,8 +89,8 @@ reads this directly (`composite_conf < 0.40` → halt new entries).
 | Chunk | Branch | Status |
 |---|---|---|
 | R1. Skeleton + MESO lens | `phase-1-regime-skeleton` | Merged |
-| R2. MACRO lens + composite | `phase-1-regime-macro` | **In review (this PR)** |
-| R3. RegimeStore + audit | `phase-1-regime-store-and-audit` | Planned |
+| R2. MACRO lens + composite | `phase-1-regime-macro` | Merged |
+| R3. RegimeStore + audit | `phase-1-regime-store-and-audit` | **In review (this PR)** |
 | R4. End-to-end integration | `phase-1-regime-integration` | Planned |
 
 ## Substrate-portability
