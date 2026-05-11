@@ -17,6 +17,15 @@ from datetime import UTC, date, datetime, time
 
 import pandas as pd
 
+from services.trader.data.audit import (
+    IngestRun,
+    ManifestWriter,
+    PostgresAuditWriter,
+)
+from services.trader.data.coverage import (
+    FeatureCoverageReport,
+    report_features,
+)
 from services.trader.data.storage.parquet_adapter import ParquetAdapter
 from services.trader.features.base import (
     BUILTIN_FEATURES,
@@ -40,6 +49,7 @@ class FeatureRunResult:
     feature_columns: list[str]
     per_feature_non_null: dict[str, int] = field(default_factory=dict)
     failures: list[str] = field(default_factory=list)
+    coverage: list[FeatureCoverageReport] = field(default_factory=list)
 
 
 class FeaturePipeline:
@@ -53,6 +63,9 @@ class FeaturePipeline:
         features: list[Feature] | None = None,
         run_id: str | None = None,
         macro_adapter: ParquetAdapter | None = None,
+        manifest_root: str | None = None,
+        audit_writer: PostgresAuditWriter | None = None,
+        audit_actor: str = "feature-pipeline",
     ) -> None:
         self.adapter = adapter
         self.store = store
@@ -62,6 +75,14 @@ class FeaturePipeline:
         # `null` series if no macro adapter is provided; the coverage report
         # surfaces the resulting null columns.
         self.macro_adapter = macro_adapter
+        # When manifest_root is set, each pipeline run appends a row to
+        # <manifest_root>/manifests/ingest-runs.parquet (same shape as the
+        # data-foundation manifest from chunk P1.1.D). When `audit_writer` is
+        # provided AND enabled, a hash-chained `audit.events` row is also
+        # written with `actor=audit_actor`, `action='compute'`.
+        self.manifest_writer = ManifestWriter(manifest_root) if manifest_root else None
+        self.audit_writer = audit_writer
+        self.audit_actor = audit_actor
         if not self.features:
             raise ValueError("FeaturePipeline requires at least one Feature")
 
@@ -81,6 +102,7 @@ class FeaturePipeline:
         rows_written = 0
         per_feature_non_null: dict[str, int] = {f.name: 0 for f in self.features}
         failures: list[str] = []
+        all_frames: list[pd.DataFrame] = []
 
         start_dt = datetime.combine(start, time.min, tzinfo=UTC)
         end_dt = datetime.combine(end, time.max, tzinfo=UTC)
@@ -114,8 +136,35 @@ class FeaturePipeline:
                 per_feature_non_null[f.name] += int(frame[f.name].notna().sum())
 
             rows_written += self.store.write(frame, features=self.features)
+            all_frames.append(frame)
 
         finished_at = datetime.now(UTC)
+
+        # Per-feature null-rate coverage, computed across all tickers in this run.
+        coverage: list[FeatureCoverageReport] = []
+        if all_frames:
+            combined = pd.concat(all_frames, ignore_index=True)
+            placeholder_cols = {f.name for f in self.features if f.placeholder}
+            coverage = report_features(
+                combined,
+                feature_columns=[f.name for f in self.features],
+                placeholder_columns=placeholder_cols,
+            )
+
+        avg_coverage_pct = (
+            sum(100.0 - r.null_rate_pct for r in coverage) / len(coverage)
+            if coverage
+            else None
+        )
+
+        self._finalize_audit(
+            started_at=started_at,
+            finished_at=finished_at,
+            rows_written=rows_written,
+            avg_coverage_pct=avg_coverage_pct,
+            failures=failures,
+        )
+
         return FeatureRunResult(
             run_id=self.run_id,
             started_at=started_at,
@@ -124,7 +173,54 @@ class FeaturePipeline:
             feature_columns=[f.name for f in self.features],
             per_feature_non_null=per_feature_non_null,
             failures=failures,
+            coverage=coverage,
         )
+
+    # --- audit / manifest finalize ---------------------------------------
+
+    def _finalize_audit(
+        self,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        rows_written: int,
+        avg_coverage_pct: float | None,
+        failures: list[str],
+    ) -> None:
+        if self.manifest_writer is not None:
+            try:
+                self.manifest_writer.append(
+                    IngestRun(
+                        run_id=self.run_id,
+                        source=PIPELINE_SOURCE,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        rows_written=rows_written,
+                        coverage_pct=avg_coverage_pct,
+                        errors=list(failures),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("feature manifest write failed: %s", exc)
+
+        if self.audit_writer is not None and self.audit_writer.is_enabled():
+            try:
+                self.audit_writer.write(
+                    actor=self.audit_actor,
+                    action="compute",
+                    payload={
+                        "run_id": self.run_id,
+                        "source": PIPELINE_SOURCE,
+                        "started_at": started_at.isoformat(),
+                        "finished_at": finished_at.isoformat(),
+                        "rows_written": rows_written,
+                        "coverage_pct": avg_coverage_pct,
+                        "feature_count": len(self.features),
+                        "errors": failures,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("feature-pipeline audit-events write failed: %s", exc)
 
     # --- internals -------------------------------------------------------
 

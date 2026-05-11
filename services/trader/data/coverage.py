@@ -184,3 +184,81 @@ def _build_report(
         passed=passed,
         missing_sample=missing[:25],
     )
+
+
+# ---------------------------------------------------------------------------
+# Feature-pipeline coverage (P1.4 F5)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FeatureCoverageReport:
+    """Per-feature-column null-rate report for a feature frame.
+
+    A row exists for every feature column the pipeline emitted. The
+    pipeline's coverage gate warns when any column's `null_rate_pct`
+    exceeds 1% beyond the placeholder columns (placeholders are 100%
+    "non-null but 0.0" and are exempt from null-rate checks by design).
+    """
+
+    feature: str
+    placeholder: bool
+    bars_total: int
+    bars_non_null: int
+    null_rate_pct: float
+    passed: bool
+
+    @property
+    def summary(self) -> str:
+        flag = " [PLACEHOLDER]" if self.placeholder else ""
+        return (
+            f"{self.feature}: {self.bars_non_null}/{self.bars_total} "
+            f"({self.null_rate_pct:.1f}% null){flag}"
+        )
+
+
+def report_features(
+    frame: pd.DataFrame,
+    *,
+    feature_columns: list[str],
+    placeholder_columns: set[str] | None = None,
+    null_rate_threshold_pct: float = 1.0,
+) -> list[FeatureCoverageReport]:
+    """Compute per-feature null-rate against the bar count of `frame`.
+
+    `placeholder_columns` lets the caller mark features that legitimately
+    return constant values (the sentiment_score placeholder) so the
+    null-rate gate doesn't fire on them — they have 0% null by definition
+    but the gate's `passed` flag is always True for placeholders.
+    """
+    placeholders = placeholder_columns or set()
+    total = len(frame)
+    reports: list[FeatureCoverageReport] = []
+    for col in feature_columns:
+        if col not in frame.columns:
+            reports.append(
+                FeatureCoverageReport(
+                    feature=col,
+                    placeholder=col in placeholders,
+                    bars_total=total,
+                    bars_non_null=0,
+                    null_rate_pct=100.0,
+                    passed=False,
+                )
+            )
+            continue
+        non_null = int(frame[col].notna().sum())
+        null_rate = 0.0 if total == 0 else 100.0 * (total - non_null) / total
+        is_placeholder = col in placeholders
+        passed = is_placeholder or null_rate <= null_rate_threshold_pct
+        reports.append(
+            FeatureCoverageReport(
+                feature=col,
+                placeholder=is_placeholder,
+                bars_total=total,
+                bars_non_null=non_null,
+                null_rate_pct=null_rate,
+                passed=passed,
+            )
+        )
+    return reports
