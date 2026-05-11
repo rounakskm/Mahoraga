@@ -18,19 +18,24 @@ Design docs:
 services/trader/regime/
 ├── base.py            Lens ABC + ClassificationResult + CompositeRegime dataclasses
 ├── meso.py            MesoLens (rule-based, ADX × realized_vol_pct_60)
+├── macro.py           MacroLens (rule-based, yield_2s10s + vix_level + dxy_change_20d)
 ├── detector.py        RegimeDetector orchestrator (in-memory; R3 adds storage)
-└── tests/             per-lens + detector unit tests
+└── tests/             per-lens + detector + composite unit tests
 ```
 
 ## Usage (R1 — in-memory only)
 
 ```python
-from services.trader.regime import RegimeDetector, MesoLens
+from services.trader.regime import RegimeDetector, MesoLens, MacroLens
 
-detector = RegimeDetector(lenses=[MesoLens()])
-result = detector.classify(scope="universe", feature_frame=feature_df)
+detector = RegimeDetector(lenses=[MesoLens(), MacroLens()])
+result = detector.classify(
+    scope="universe",
+    feature_frame=feature_df,
+    macro_frame=macro_df,
+)
 for row in result.rows:
-    print(row.meso, row.composite_conf)
+    print(row.meso, row.macro, row.composite_conf)
 ```
 
 `feature_df` must include columns named by each lens's
@@ -50,9 +55,16 @@ from `FeatureStore` + `ParquetAdapter`.
 
 `UNDEFINED_LABEL` when either input is NaN.
 
-### MACRO lens (R2) — `bull` / `bear` / `transitioning`
+### MACRO lens (R2) — 3 labels
 
-Lands in chunk R2 (see plan).
+| Label | Trigger (`macro_score` ∈ [-1, 1]) |
+|---|---|
+| `bull`          | `macro_score >= 0.50`  |
+| `bear`          | `macro_score <= -0.50` |
+| `transitioning` | otherwise              |
+
+`macro_score = (curve_signal + vix_signal + dxy_signal) / 3` where each
+signal is `±1` (or `0` for VIX in the 18–25 band). `macro_conf = abs(macro_score)`.
 
 ## Confidence
 
@@ -66,8 +78,8 @@ reads this directly (`composite_conf < 0.40` → halt new entries).
 
 | Chunk | Branch | Status |
 |---|---|---|
-| R1. Skeleton + MESO lens | `phase-1-regime-skeleton` | **In review (this PR)** |
-| R2. MACRO lens + composite | `phase-1-regime-macro` | Planned |
+| R1. Skeleton + MESO lens | `phase-1-regime-skeleton` | Merged |
+| R2. MACRO lens + composite | `phase-1-regime-macro` | **In review (this PR)** |
 | R3. RegimeStore + audit | `phase-1-regime-store-and-audit` | Planned |
 | R4. End-to-end integration | `phase-1-regime-integration` | Planned |
 
