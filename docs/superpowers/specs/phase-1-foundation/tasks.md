@@ -100,31 +100,31 @@ Critical path. Unblocks every other sub-feature. **All five chunks merged 2026-0
 
 ### P1.4 — `feature-pipeline-spec.md` (sub-feature 4) ‖ P1.5
 
-- [ ] **P1.4.spec [plan]** Author `feature-pipeline-spec.md`: 70+ features across 7 categories; sentiment placeholder column behavior; multi-source PIT join rule; backtest-harness opt-in `allow_placeholder_features` flag. → P1.2.spec + P1.3.spec
-- [ ] **P1.4.plan + tasks [plan]** → P1.4.spec
-- [ ] **P1.4.code [code]** Implement features incrementally (trend → momentum → volatility → volume → statistical → macro → sentiment-placeholder). → P1.4.plan + P1.2.code + P1.3.code
-- [ ] **P1.4.test [test]** Per-feature unit tests + a feature-vs-known-fixture regression test (e.g. RSI on a synthetic series matches a reference implementation). → P1.4.code
+- [x] **P1.4.spec [plan]** Authored at `phase-1-foundation/feature-pipeline-spec.md` (PR #22 series). 70+ features across 7 categories; sentiment placeholder behavior; multi-source PIT join rule; `allow_placeholder_features` opt-in.
+- [x] **P1.4.plan + tasks [plan]** `feature-pipeline-{plan,tasks}.md`.
+- [x] **P1.4.code [code]** F1 trend (#22), F2 momentum + volatility (#23), F3 volume + statistical (#24), F4 macro (#25), F5 sentiment + coverage + audit (#26).
+- [x] **P1.4.test [test]** Per-feature unit tests + F6 end-to-end integration (#27).
 
 ### P1.5 — `regime-detector-spec.md` (sub-feature 5) ‖ P1.4
 
-- [ ] **P1.5.spec [plan]** Author `regime-detector-spec.md`: MACRO/MESO/MICRO taxonomy + label set; deterministic Python classifier signature; ≥75% accuracy on labeled sample target; the LLM-narration prompts (`services/trader/prompts/researcher/macro-rates-monitor.md`, `option-vol-analysis.md`) are documented as the Phase-3 narration path, NOT used by the v1 detector. → P1.4.spec (subset of features needed)
-- [ ] **P1.5.plan + tasks [plan]** → P1.5.spec
-- [ ] **P1.5.label-set [doc]** Hand-labeled regime sample finalized; calibrated against 2018 vol regime, 2020 COVID, 2022 inflation, etc.; operator review. → P1.5.spec
-- [ ] **P1.5.code [code]** Implement v1 classifier consuming the regime-relevant feature subset. → P1.5.label-set + P1.4.code
-- [ ] **P1.5.test [test]** Accuracy validation against held-out labels; ≥75% threshold gate. → P1.5.code
+- [x] **P1.5.spec [plan]** Authored at `phase-1-foundation/regime-detector-spec.md` (PR #28). Phase 1 scope = MESO + starter MACRO lens (daily bars); MICRO deferred to Phase 4.
+- [x] **P1.5.plan + tasks [plan]** `regime-detector-{plan,tasks}.md` (PR #28).
+- [ ] **P1.5.label-set [doc]** Hand-labeled regime sample. *Deferred to Phase 4* — Phase 1 ships a deterministic rule-based classifier and per-bar fixtures cover label correctness; full hand-labeled sample + ≥75% accuracy gate move into Phase 4 once we have a model to calibrate against.
+- [x] **P1.5.code [code]** R1 skeleton + MESO (#29), R2 MACRO + composite (#30), R3 RegimeStore + audit (#31).
+- [x] **P1.5.test [test]** Per-lens unit tests + R4 end-to-end integration (#32). Accuracy gate replaced with deterministic per-label fixtures + a 4×3 composite-sweep test in `services/trader/regime/tests/test_composite.py`.
 
 ### P1.6 — `backtest-harness-spec.md` (sub-feature 6)
 
-- [ ] **P1.6.spec [plan]** Author `backtest-harness-spec.md`: vectorbt wrapper API; `Strategy` ABC; placeholder `FitnessReport` shape; integration with the `audit-xls` reviewer prompt's hard-limit checks (already merged at `services/trader/prompts/reviewer/audit-xls.md`). → P1.4.spec + P1.5.spec
-- [ ] **P1.6.plan + tasks [plan]** → P1.6.spec
-- [ ] **P1.6.code [code]** Implement the wrapper; stub Strategy + placeholder FitnessReport; <30 s runtime on a representative sample. → P1.4.code + P1.5.code + P1.6.plan
-- [ ] **P1.6.test [test]** End-to-end test: stub strategy + sample feature parquet → FitnessReport. → P1.6.code
+- [x] **P1.6.spec [plan]** Authored at `phase-1-foundation/backtest-harness-spec.md` (PR #33). **Departure from sketch**: pure pandas / numpy engine, not vectorbt. FitnessReport contract is engine-agnostic; Phase 2 can swap if throughput demands.
+- [x] **P1.6.plan + tasks [plan]** `backtest-harness-{plan,tasks}.md` (PR #33).
+- [x] **P1.6.code [code]** B1 skeleton + Strategy ABC + BuyAndHold + placeholder gate (#34); B2 engine + risk-limit firewall stub (#35).
+- [x] **P1.6.test [test]** B3 end-to-end integration (#36) — full chain ingest → features → regime → backtest under Postgres with 4-row audit hash chain.
 
 ### P1.exit — Phase 1 closure
 
-- [ ] **P1.exit.tests [test]** All `tests/integration/phase-1/` tests green in CI.
-- [ ] **P1.exit.doc [doc]** Author `docs/measurements/phase-1-exit-verification.md` (analogous to Phase 0's).
-- [ ] **P1.exit.tag [doc]** Tag `phase-1-complete` and push. → all P1.x.test items green.
+- [x] **P1.exit.tests [test]** All `tests/integration/phase-1/{data_foundation,universe,feature_pipeline,regime,backtest}/` suites green in CI's `integration-smoke` job as of PR #36.
+- [ ] **P1.exit.doc [doc]** Author `docs/measurements/phase-1-exit-verification.md` (analogous to Phase 0's). *Pending — to be written before tagging.*
+- [ ] **P1.exit.tag [doc]** Tag `phase-1-complete` and push. *Awaiting user confirmation + exit-verification doc.*
 
 ### P1.7 — `btc-data-spec.md` (deferred sub-feature)
 
