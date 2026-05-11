@@ -18,12 +18,14 @@ from services.trader.regime.base import (
     RegimeRunResult,
 )
 from services.trader.regime.detector import RegimeDetector
+from services.trader.regime.macro import MacroLens
 from services.trader.regime.meso import MesoLens
 
 __all__ = [
     "ClassificationResult",
     "CompositeRegime",
     "Lens",
+    "MacroLens",
     "MesoLens",
     "RegimeDetector",
     "RegimeRunResult",
