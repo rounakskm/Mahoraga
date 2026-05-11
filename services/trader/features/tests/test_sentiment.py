@@ -14,7 +14,7 @@ from services.trader.features import BUILTIN_FEATURES, FeaturePipeline
 from services.trader.features.sentiment import PlaceholderFeature
 from services.trader.features.store import FeatureStore
 from services.trader.features.tests.conftest import make_ctx, synthetic_ohlcv
-from services.trader.features.trend import EMA
+from services.trader.features.trend import EMA, SMA
 
 
 def _result(df: pd.DataFrame) -> ConnectorResult:
@@ -150,11 +150,11 @@ class TestPipelineCoverage:
         store = FeatureStore(tmp_path / "features", vault_cutoff_days=None)
         adapter.write(_result(synthetic_ohlcv(ticker="SPY", bars=30)), kind="ohlcv")
 
-        # EMA-20 has warmup → first 19 bars are NaN → ~63% null rate
+        # SMA-20 has warmup → first 19 bars are NaN → ~63% null rate
         pipeline = FeaturePipeline(
             adapter=adapter,
             store=store,
-            features=[EMA(span=20), PlaceholderFeature("sentiment_score")],
+            features=[SMA(window=20), PlaceholderFeature("sentiment_score")],
         )
         result = pipeline.compute(
             tickers=["SPY"],
@@ -164,11 +164,11 @@ class TestPipelineCoverage:
         assert len(result.coverage) == 2
         by_name = {c.feature: c for c in result.coverage}
 
-        # EMA warmup → null rate > 1% → coverage gate fails (passed=False)
-        ema = by_name["ema_20"]
-        assert ema.placeholder is False
-        assert ema.null_rate_pct > 1.0
-        assert ema.passed is False
+        # SMA warmup → null rate > 1% → coverage gate fails (passed=False)
+        sma = by_name["sma_20"]
+        assert sma.placeholder is False
+        assert sma.null_rate_pct > 1.0
+        assert sma.passed is False
 
         # Placeholder column has zero null rate by construction; passed=True
         sentiment = by_name["sentiment_score"]
