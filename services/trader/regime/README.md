@@ -90,8 +90,8 @@ reads this directly (`composite_conf < 0.40` → halt new entries).
 |---|---|---|
 | R1. Skeleton + MESO lens | `phase-1-regime-skeleton` | Merged |
 | R2. MACRO lens + composite | `phase-1-regime-macro` | Merged |
-| R3. RegimeStore + audit | `phase-1-regime-store-and-audit` | **In review (this PR)** |
-| R4. End-to-end integration | `phase-1-regime-integration` | Planned |
+| R3. RegimeStore + audit | `phase-1-regime-store-and-audit` | Merged |
+| R4. End-to-end integration | `phase-1-regime-integration` | **In review (this PR)** |
 
 ## Substrate-portability
 
