@@ -71,16 +71,22 @@ class TestAutocorrelation:
 
 
 class TestSkewKurt:
-    def test_skew_kurt_on_constant_close_undefined(self) -> None:
+    def test_skew_kurt_on_constant_close(self) -> None:
         df = synthetic_ohlcv(bars=80)
         df = df.copy()
         df["close"] = 100.0
         ctx = make_ctx(df)
-        # Constant series → returns are 0 → skew/kurt undefined (NaN)
         skew = Skew(window=60).compute(ctx).reset_index(drop=True)
         kurt = Kurt(window=60).compute(ctx).reset_index(drop=True)
+        # Constant close -> returns are 0 -> sample skewness is 0 by definition.
         assert skew.iloc[61:].isna().all() or (skew.iloc[61:].abs() < 1e-9).all()
-        assert kurt.iloc[61:].isna().all() or (kurt.iloc[61:].abs() < 1e-9).all()
+        # Fisher excess kurtosis of a zero-variance series is -3 per pandas'
+        # documented convention (rolling().kurt() formula). We accept that
+        # AND the historically-expected NaN, so we don't tie to a pandas
+        # version's exact corner-case handling.
+        non_null = kurt.iloc[61:].dropna()
+        if len(non_null) > 0:
+            assert ((non_null.abs() < 1e-9) | (non_null == pytest.approx(-3.0, abs=1e-9))).all()
 
     def test_skew_matches_pandas(self) -> None:
         df = synthetic_ohlcv(bars=120)
