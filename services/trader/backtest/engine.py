@@ -363,7 +363,8 @@ def _sharpe(returns: pd.Series) -> float:
     if returns.empty:
         return 0.0
     std = returns.std(ddof=0)
-    if std == 0 or math.isnan(std):
+    # Tolerate floating-point noise on near-constant series.
+    if not math.isfinite(std) or std < 1e-12:
         return 0.0
     return float(returns.mean() / std * math.sqrt(TRADING_DAYS_PER_YEAR))
 

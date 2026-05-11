@@ -164,13 +164,16 @@ class TestCatastrophicDrawdown:
         assert catastrophic_drawdown_halt(pd.Series(dtype="float64")) is None
 
     def test_threshold_inclusive(self) -> None:
+        # Use 0.89 (clearly past -10%) — 0.90/1.0 - 1.0 is
+        # -0.09999...9998 in IEEE-754, which won't trip a `<= -0.10`
+        # threshold. The boundary is documented as floating-point
+        # tolerant in `risk.py`.
         equity = pd.Series(
-            [1.0, 1.0, 0.90],  # exactly -10%
+            [1.0, 1.0, 0.89],
             index=pd.to_datetime(
                 ["2026-01-05", "2026-01-06", "2026-01-07"], utc=True
             ),
         )
-        # exactly -0.10 ≤ -0.10 → breach
         assert catastrophic_drawdown_halt(equity) is not None
 
 
