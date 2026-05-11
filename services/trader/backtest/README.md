@@ -62,8 +62,8 @@ a placeholder.
 | Chunk | Branch | Status |
 |---|---|---|
 | B1. Skeleton + BuyAndHold | `phase-1-backtest-skeleton` | Merged |
-| B2. Engine + risk-limit firewall | `phase-1-backtest-engine-and-risk` | **In review (this PR)** |
-| B3. End-to-end integration (closes Phase 1) | `phase-1-backtest-integration` | Planned |
+| B2. Engine + risk-limit firewall | `phase-1-backtest-engine-and-risk` | Merged |
+| B3. End-to-end integration (closes Phase 1) | `phase-1-backtest-integration` | **In review (this PR — closes Phase 1)** |
 
 ## Substrate-portability
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import math
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
@@ -45,6 +46,11 @@ from services.trader.backtest.risk import (
     halt_daily_loss,
     halt_low_confidence,
 )
+from services.trader.data.audit import (
+    IngestRun,
+    ManifestWriter,
+    PostgresAuditWriter,
+)
 from services.trader.data.storage.parquet_adapter import ParquetAdapter
 from services.trader.features.base import BUILTIN_FEATURES, Feature
 from services.trader.features.store import FeatureStore
@@ -53,6 +59,7 @@ from services.trader.regime.store import RegimeStore
 logger = logging.getLogger(__name__)
 
 TRADING_DAYS_PER_YEAR = 252
+BACKTEST_SOURCE = "backtest-harness"
 
 
 @dataclass(frozen=True)
@@ -79,6 +86,9 @@ class Backtest:
         slippage_bps: float = 5.0,
         builtin_features: list[Feature] | None = None,
         sector_map: Mapping[str, str] | None = None,
+        manifest_root: str | None = None,
+        audit_writer: PostgresAuditWriter | None = None,
+        audit_actor: str = "backtest-harness",
     ) -> None:
         self.feature_store = feature_store
         self.regime_store = regime_store
@@ -93,6 +103,11 @@ class Backtest:
             else list(BUILTIN_FEATURES)
         )
         self.sector_map = dict(sector_map or {})
+        self.manifest_writer = (
+            ManifestWriter(manifest_root) if manifest_root else None
+        )
+        self.audit_writer = audit_writer
+        self.audit_actor = audit_actor
 
     def run(
         self,
@@ -106,12 +121,23 @@ class Backtest:
         regime_lens_names: list[str] | None = None,
         feature_columns: list[str] | None = None,
     ) -> FitnessReport:
+        started_at = datetime.now(UTC)
+        run_id = str(uuid.uuid4())
         try:
             validate_strategy(
                 strategy, builtin_features=self.builtin_features
             )
         except PlaceholderFeatureError as exc:
-            return self._rejected_report(strategy, start, end, str(exc))
+            report = self._rejected_report(strategy, start, end, str(exc))
+            self._finalize_audit(
+                run_id=run_id,
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                strategy=strategy,
+                report=report,
+                errors=[str(exc)],
+            )
+            return report
 
         start_dt = datetime.combine(start, time.min, tzinfo=UTC)
         end_dt = datetime.combine(end, time.max, tzinfo=UTC)
@@ -119,7 +145,16 @@ class Backtest:
 
         ohlcv = self._read_ohlcv(universe, start_dt, end_dt, asof_dt)
         if ohlcv.empty:
-            return self._empty_report(strategy, start, end)
+            report = self._empty_report(strategy, start, end)
+            self._finalize_audit(
+                run_id=run_id,
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                strategy=strategy,
+                report=report,
+                errors=["no OHLCV in window"],
+            )
+            return report
 
         feature_frame = self._read_features(
             universe, start_dt, end_dt, asof_dt, feature_columns
@@ -162,7 +197,7 @@ class Backtest:
         equity = (1.0 + portfolio_return).cumprod() * self.initial_capital
         halted_at = catastrophic_drawdown_halt(equity)
 
-        return self._assemble_report(
+        report = self._assemble_report(
             strategy=strategy,
             start=start,
             end=end,
@@ -173,6 +208,15 @@ class Backtest:
             regime_frame=regime_frame,
             weight_changes=weight_changes,
         )
+        self._finalize_audit(
+            run_id=run_id,
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            strategy=strategy,
+            report=report,
+            errors=[],
+        )
+        return report
 
     # --- reads ---------------------------------------------------------
 
@@ -357,6 +401,56 @@ class Backtest:
             win_rate=0.0,
             rejected_reason=reason,
         )
+
+    # --- audit / manifest ---------------------------------------------
+
+    def _finalize_audit(
+        self,
+        *,
+        run_id: str,
+        started_at: datetime,
+        finished_at: datetime,
+        strategy: Strategy,
+        report: FitnessReport,
+        errors: list[str],
+    ) -> None:
+        if self.manifest_writer is not None:
+            try:
+                self.manifest_writer.append(
+                    IngestRun(
+                        run_id=run_id,
+                        source=BACKTEST_SOURCE,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        rows_written=report.num_trades,
+                        coverage_pct=None,
+                        errors=list(errors),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("backtest manifest write failed: %s", exc)
+
+        if self.audit_writer is not None and self.audit_writer.is_enabled():
+            try:
+                self.audit_writer.write(
+                    actor=self.audit_actor,
+                    action="run",
+                    payload={
+                        "run_id": run_id,
+                        "source": BACKTEST_SOURCE,
+                        "strategy": strategy.name,
+                        "started_at": started_at.isoformat(),
+                        "finished_at": finished_at.isoformat(),
+                        "total_return": report.total_return,
+                        "sharpe": report.sharpe,
+                        "max_drawdown": report.max_drawdown,
+                        "num_trades": report.num_trades,
+                        "rejected_reason": report.rejected_reason,
+                        "errors": errors,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("backtest audit-events write failed: %s", exc)
 
 
 def _sharpe(returns: pd.Series) -> float:
