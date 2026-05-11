@@ -52,11 +52,16 @@ class FeaturePipeline:
         store: FeatureStore,
         features: list[Feature] | None = None,
         run_id: str | None = None,
+        macro_adapter: ParquetAdapter | None = None,
     ) -> None:
         self.adapter = adapter
         self.store = store
         self.features = list(features) if features is not None else list(BUILTIN_FEATURES)
         self.run_id = run_id or str(uuid.uuid4())
+        # Macro adapter is optional. Macro-category features fall back to a
+        # `null` series if no macro adapter is provided; the coverage report
+        # surfaces the resulting null columns.
+        self.macro_adapter = macro_adapter
         if not self.features:
             raise ValueError("FeaturePipeline requires at least one Feature")
 
@@ -133,7 +138,13 @@ class FeaturePipeline:
     ) -> pd.DataFrame:
         """Compute every feature for one ticker; return a feature frame."""
         ordered = ohlcv.sort_values("bar_timestamp").reset_index(drop=True)
-        ctx = FeatureContext(ticker=ticker, frame=ordered, asof=asof)
+        ctx = FeatureContext(
+            ticker=ticker,
+            frame=ordered,
+            asof=asof,
+            macro_fetcher=self._build_macro_fetcher(asof),
+            ohlcv_fetcher=self._build_ohlcv_fetcher(asof),
+        )
 
         out = pd.DataFrame(
             {
@@ -169,6 +180,43 @@ class FeaturePipeline:
         out["fetched_at"] = pd.Timestamp(fetched_at)
         out["revision_at"] = pd.NaT
         return out
+
+    # --- macro / ohlcv fetcher factories --------------------------------
+
+    def _build_macro_fetcher(self, asof: datetime):  # type: ignore[no-untyped-def]
+        if self.macro_adapter is None:
+            return None
+
+        def fetcher(indicator: str) -> pd.DataFrame:
+            try:
+                return self.macro_adapter.read(  # type: ignore[union-attr]
+                    kind="macro",
+                    keys=[indicator],
+                    start=datetime(2000, 1, 1, tzinfo=UTC),
+                    end=asof,
+                    asof=asof,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("macro fetch %s failed: %s", indicator, exc)
+                return pd.DataFrame()
+
+        return fetcher
+
+    def _build_ohlcv_fetcher(self, asof: datetime):  # type: ignore[no-untyped-def]
+        def fetcher(ticker: str) -> pd.DataFrame:
+            try:
+                return self.adapter.read(
+                    kind="ohlcv",
+                    keys=[ticker],
+                    start=datetime(2000, 1, 1, tzinfo=UTC),
+                    end=asof,
+                    asof=asof,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ohlcv fetch %s failed: %s", ticker, exc)
+                return pd.DataFrame()
+
+        return fetcher
 
 
 def empty_feature_frame(features: list[Feature]) -> FeatureFrame:
