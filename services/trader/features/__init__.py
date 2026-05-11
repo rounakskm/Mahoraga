@@ -9,6 +9,7 @@ See `docs/superpowers/specs/phase-1-foundation/feature-pipeline-spec.md`.
 from services.trader.features import (
     macro,  # noqa: F401, E402
     momentum,  # noqa: F401, E402
+    sentiment,  # noqa: F401, E402
     statistical,  # noqa: F401, E402
     trend,  # noqa: F401, E402
     volatility,  # noqa: F401, E402
