@@ -44,7 +44,7 @@ class TestComposite:
         """Strong MESO trending_low_vol + clear MACRO bull."""
         detector = RegimeDetector(lenses=[MesoLens(), MacroLens()])
         feature_frame = pd.DataFrame(
-            [_row(adx=50.0, vol_pct=0.10, bar_timestamp="2026-01-05")]
+            [_row(adx=50.0, vol_pct=0.0, bar_timestamp="2026-01-05")]
         )
         macro_frame = pd.DataFrame(
             [_macro_row(slope=0.5, vix=14.0, dxy=-1.0, bar_timestamp="2026-01-05")]
@@ -65,7 +65,7 @@ class TestComposite:
         """MESO confidence high, MACRO moderate → composite tracks MACRO."""
         detector = RegimeDetector(lenses=[MesoLens(), MacroLens()])
         feature_frame = pd.DataFrame(
-            [_row(adx=50.0, vol_pct=0.10, bar_timestamp="2026-01-05")]
+            [_row(adx=50.0, vol_pct=0.0, bar_timestamp="2026-01-05")]
         )
         # curve +1, vix 0 (in middle), dxy +1 → score 2/3 ≈ 0.667
         macro_frame = pd.DataFrame(
@@ -86,7 +86,7 @@ class TestComposite:
         """If MACRO inputs are NaN, macro_conf=0, composite collapses to 0."""
         detector = RegimeDetector(lenses=[MesoLens(), MacroLens()])
         feature_frame = pd.DataFrame(
-            [_row(adx=50.0, vol_pct=0.10, bar_timestamp="2026-01-05")]
+            [_row(adx=50.0, vol_pct=0.0, bar_timestamp="2026-01-05")]
         )
         macro_frame = pd.DataFrame(
             [
@@ -113,7 +113,7 @@ class TestComposite:
     def test_nan_meso_collapses_composite(self) -> None:
         detector = RegimeDetector(lenses=[MesoLens(), MacroLens()])
         feature_frame = pd.DataFrame(
-            [_row(adx=float("nan"), vol_pct=0.10, bar_timestamp="2026-01-05")]
+            [_row(adx=float("nan"), vol_pct=0.0, bar_timestamp="2026-01-05")]
         )
         macro_frame = pd.DataFrame(
             [_macro_row(slope=0.5, vix=14.0, dxy=-1.0, bar_timestamp="2026-01-05")]
@@ -131,7 +131,7 @@ class TestComposite:
     def test_inputs_snapshot_merges_both_lenses(self) -> None:
         detector = RegimeDetector(lenses=[MesoLens(), MacroLens()])
         feature_frame = pd.DataFrame(
-            [_row(adx=50.0, vol_pct=0.10, bar_timestamp="2026-01-05")]
+            [_row(adx=50.0, vol_pct=0.0, bar_timestamp="2026-01-05")]
         )
         macro_frame = pd.DataFrame(
             [_macro_row(slope=0.5, vix=14.0, dxy=-1.0, bar_timestamp="2026-01-05")]
