@@ -69,7 +69,9 @@ def _join_macro_to_bars(
     m["as_of_release_dt"] = pd.to_datetime(m["as_of_release_date"], utc=True)
     m = m.sort_values("as_of_release_dt").reset_index(drop=True)
 
-    bars_df = pd.DataFrame({"bar_timestamp": bars.values})
+    # Build the left side with tz-aware bar_timestamp; `.values` would strip
+    # the timezone and cause pd.merge_asof to reject the dtype mismatch.
+    bars_df = pd.DataFrame({"bar_timestamp": pd.to_datetime(bars, utc=True)})
     bars_df = bars_df.sort_values("bar_timestamp").reset_index()
     merged = pd.merge_asof(
         bars_df,
@@ -291,7 +293,11 @@ def _join_ohlcv_to_bars(ohlcv: pd.DataFrame, bars: pd.Series) -> pd.Series:
         return pd.Series([np.nan] * len(bars), dtype="float64")
 
     o = ohlcv.sort_values("bar_timestamp").reset_index(drop=True)
-    bars_df = pd.DataFrame({"bar_timestamp": bars.values}).reset_index()
+    # Preserve the tz on bar_timestamp (Series.values strips tz on numpy arrays
+    # and pd.merge_asof rejects the dtype mismatch).
+    bars_df = pd.DataFrame(
+        {"bar_timestamp": pd.to_datetime(bars, utc=True)}
+    ).reset_index()
     bars_df = bars_df.sort_values("bar_timestamp")
     merged = pd.merge_asof(
         bars_df,
