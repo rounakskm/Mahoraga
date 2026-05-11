@@ -74,8 +74,8 @@ df = store.read(
 | F2. Momentum + volatility (20 features) | `phase-1-features-momentum-volatility` | Merged |
 | F3. Volume + statistical (20 features) | `phase-1-features-volume-statistical` | Merged |
 | F4. Macro (10 features) | `phase-1-features-macro` | Merged |
-| F5. Sentiment placeholder + coverage + audit | `phase-1-features-sentiment-and-coverage` | **In review (this PR)** |
-| F6. End-to-end integration | `phase-1-features-integration` | Planned |
+| F5. Sentiment placeholder + coverage + audit | `phase-1-features-sentiment-and-coverage` | Merged |
+| F6. End-to-end integration | `phase-1-features-integration` | **In review (this PR)** |
 
 ## Substrate-portability
 
