@@ -86,7 +86,11 @@ class TestSkewKurt:
         # version's exact corner-case handling.
         non_null = kurt.iloc[61:].dropna()
         if len(non_null) > 0:
-            assert ((non_null.abs() < 1e-9) | (non_null == pytest.approx(-3.0, abs=1e-9))).all()
+            # Element-wise: each kurt value is either ~0 (legacy NaN-or-zero path)
+            # or ~-3.0 (pandas Fisher excess kurt of a zero-variance window).
+            close_to_zero = non_null.abs() < 1e-9
+            close_to_neg3 = (non_null + 3.0).abs() < 1e-9
+            assert (close_to_zero | close_to_neg3).all()
 
     def test_skew_matches_pandas(self) -> None:
         df = synthetic_ohlcv(bars=120)
