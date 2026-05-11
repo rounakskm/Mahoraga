@@ -22,8 +22,8 @@ services/trader/features/
 ├── trend.py           Trend-category Feature implementations (10 features)
 ├── momentum.py        Momentum-category (10 features)
 ├── volatility.py      Volatility-category (10 features)
-├── volume.py          Volume-category (chunk F3, planned)
-├── statistical.py     Statistical-category (chunk F3, planned)
+├── volume.py          Volume-category (10 features)
+├── statistical.py     Statistical-category (10 features)
 ├── macro.py           Macro features w/ PIT macro fetch (chunk F4, planned)
 ├── sentiment.py       Placeholder sentiment_score (chunk F5, planned)
 └── tests/             Per-category unit tests + pipeline test
@@ -71,8 +71,8 @@ df = store.read(
 | Chunk | Branch | Status |
 |---|---|---|
 | F1. Skeleton + 10 trend features | `phase-1-features-skeleton` | Merged |
-| F2. Momentum + volatility (20 features) | `phase-1-features-momentum-volatility` | **In review (this PR)** |
-| F3. Volume + statistical | `phase-1-features-volume-statistical` | Planned |
+| F2. Momentum + volatility (20 features) | `phase-1-features-momentum-volatility` | Merged |
+| F3. Volume + statistical (20 features) | `phase-1-features-volume-statistical` | **In review (this PR)** |
 | F4. Macro | `phase-1-features-macro` | Planned |
 | F5. Sentiment placeholder + coverage + audit | `phase-1-features-sentiment-and-coverage` | Planned |
 | F6. End-to-end integration | `phase-1-features-integration` | Planned |

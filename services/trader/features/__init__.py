@@ -8,8 +8,10 @@ See `docs/superpowers/specs/phase-1-foundation/feature-pipeline-spec.md`.
 # kwarg to FeaturePipeline rather than relying on the default registry.
 from services.trader.features import (
     momentum,  # noqa: F401, E402
+    statistical,  # noqa: F401, E402
     trend,  # noqa: F401, E402
     volatility,  # noqa: F401, E402
+    volume,  # noqa: F401, E402
 )
 from services.trader.features.base import (
     BUILTIN_FEATURES,
