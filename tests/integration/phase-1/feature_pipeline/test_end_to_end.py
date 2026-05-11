@@ -157,7 +157,7 @@ class TestFeaturePipelineEndToEnd:
         audit_logger: AuditLogger,
     ) -> None:
         adapter = ParquetAdapter(parquet_root, vault_cutoff_days=None)
-        store = FeatureStore(features_root / "features", vault_cutoff_days=None)
+        store = FeatureStore(features_root, vault_cutoff_days=None)
         dsn = os.environ["MAHORAGA_TEST_DSN"]
         pre_id = _snapshot_audit_head(dsn)
 
@@ -268,7 +268,7 @@ class TestFeaturePipelineEndToEnd:
         audit_logger: AuditLogger,
     ) -> None:
         adapter = ParquetAdapter(parquet_root, vault_cutoff_days=None)
-        store = FeatureStore(features_root / "features", vault_cutoff_days=None)
+        store = FeatureStore(features_root, vault_cutoff_days=None)
         _ingest_ohlcv(adapter, audit_logger)
 
         pipeline = FeaturePipeline(
@@ -296,11 +296,11 @@ class TestFeaturePipelineEndToEnd:
         # ParquetAdapter. Reading a window that overlaps "now - 180d"
         # without an override must raise.
         adapter = ParquetAdapter(parquet_root, vault_cutoff_days=None)
-        store = FeatureStore(features_root / "features", vault_cutoff_days=180)
+        store = FeatureStore(features_root, vault_cutoff_days=180)
         _ingest_ohlcv(adapter, audit_logger)
         FeaturePipeline(
             adapter=adapter,
-            store=FeatureStore(features_root / "features", vault_cutoff_days=None),
+            store=FeatureStore(features_root, vault_cutoff_days=None),
             features=[SMA(window=20)],
         ).compute(tickers=["SPY"], start=_START, end=_END)
 
