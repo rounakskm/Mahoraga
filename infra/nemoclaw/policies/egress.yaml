@@ -7,6 +7,12 @@ egress:
     - http://litellm:4000
     # Application database
     - http://postgres:5432
+    # Hermes harness phone-home (skills sync, update check, pairing).
+    # Added 2026-06-12 with the OpenClaw -> Hermes migration. Required for the
+    # gateway to start and for the self-evolving skills hub; scoped to Nous hosts.
+    - https://nousresearch.com
+    - https://hermes-agent.nousresearch.com
+    - https://api.nousresearch.com
     # Phase 1 — market data (free APIs first)
     - https://query1.finance.yahoo.com         # yfinance
     - https://api.alpaca.markets                # Alpaca free tier

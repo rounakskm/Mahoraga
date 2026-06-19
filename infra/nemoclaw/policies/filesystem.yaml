@@ -1,12 +1,15 @@
 # Filesystem policy — agent's home is read-only; only specific paths writable.
-# Matches NemoClaw blueprint's standard layout per nemoclaw-user-overview/ecosystem.md.
+# Harness migrated OpenClaw -> Hermes 2026-06-12; paths updated .openclaw -> .hermes.
 filesystem:
   read_only:
     - /sandbox                                  # entire home read-only by default
-    - /sandbox/.openclaw                        # gateway config — locked
+    - /sandbox/.hermes                          # gateway config + auth + pairing — locked
+    - /sandbox/skills/stable                    # promoted (operator-reviewed) skills — read-only at runtime
   read_write:
-    - /sandbox/.openclaw-data                   # OpenClaw operational data
+    - /sandbox/.hermes-data                     # Hermes operational data (sessions, state.db cache)
+    - /sandbox/.hermes/memories                 # Hermes MEMORY.md scratch (ephemeral; NOT canonical — see ADR §4 Mitigation 3)
+    - /sandbox/skills/agent_created             # Hermes auto-written SKILL.md (quarantined; never on live tool path)
     - /sandbox/.nemoclaw                        # NemoClaw blueprint state
-    - /tmp                                      # transient
-    - /sandbox/data/parquet                     # feature store (mount from host)
-    - /sandbox/data/audit                       # audit log (mount from host)
+    - /tmp                                       # transient
+    - /sandbox/data/parquet                      # feature store (mount from host)
+    - /sandbox/data/audit                        # audit log (mount from host)

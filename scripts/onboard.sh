@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Onboard a Mahoraga sandbox via NemoClaw.
-# Phase 0 smoke: brings up one OpenClaw assistant inside a NemoClaw-hardened sandbox.
+# Phase 0 smoke: brings up one Hermes assistant inside a NemoClaw-hardened sandbox.
+# (Harness migrated OpenClaw -> Hermes 2026-06-12; see ADR 2026-06-12-hermes-runtime-migration.md.)
 #
 # NemoClaw v0.1.0 ships an INTERACTIVE TUI wizard for `nemoclaw onboard`. It does
 # NOT take --blueprint / --inference-provider / --inference-base-url flags; the
@@ -30,8 +31,9 @@ echo "  - Model: ollama/gemma4  (the LiteLLM alias)"
 echo "  - Telegram: skip (Phase 6 concern) unless you have a bot ready"
 echo
 
-# Pass through any flags the operator wants (e.g., --non-interactive, --recreate-sandbox)
-nemoclaw onboard --yes-i-accept-third-party-software "$@"
+# Pass through any flags the operator wants (e.g., --non-interactive, --recreate-sandbox).
+# --agent hermes selects the Hermes harness (default agent in NEMOCLAW_AGENT, onboard.env).
+nemoclaw onboard --agent "${NEMOCLAW_AGENT:-hermes}" --yes-i-accept-third-party-software "$@"
 
 echo
 echo "Onboard wizard exited. Verify with:"
