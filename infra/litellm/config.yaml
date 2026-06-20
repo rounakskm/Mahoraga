@@ -13,6 +13,38 @@ model_list:
       model: ollama/gemma4-cpu:e4b
       api_base: http://host.docker.internal:11434
 
+  # NVIDIA Build (NIM) — hosted, OpenAI-compatible, free tier. base_url +
+  # Bearer nvapi-... key. These are the models from the NVIDIA + Hermes
+  # reference deployment. Ultra (550B) is the Hermes orchestrator primary;
+  # Super (120B) is the cheaper/faster option for high-frequency paths
+  # (e.g. the Phase-3 autoresearch loop, Hindsight entity extraction).
+  - model_name: nvidia/nemotron-ultra
+    litellm_params:
+      model: openai/nvidia/nemotron-3-ultra-550b-a55b
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+  - model_name: nvidia/nemotron-super
+    litellm_params:
+      model: openai/nvidia/nemotron-3-super-120b-a12b
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+
+  # Small/fast NVIDIA model for high-frequency paths (Hindsight entity
+  # extraction during retain(), cheap classification). 30B MoE, ~3B active.
+  - model_name: nvidia/nemotron-nano
+    litellm_params:
+      model: openai/nvidia/nemotron-3-nano-30b-a3b
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+
+  # DeepSeek V4 Pro — also hosted free on NVIDIA Build, OpenAI-compatible.
+  # A second heavy reasoning option to A/B against Nemotron Ultra.
+  - model_name: deepseek/v4-pro
+    litellm_params:
+      model: openai/deepseek-ai/deepseek-v4-pro
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+
   # Cloud fallback — Anthropic. Only used when ANTHROPIC_API_KEY is real.
   - model_name: anthropic/claude-opus-4-7
     litellm_params:

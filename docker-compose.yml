@@ -28,6 +28,7 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -68,10 +69,12 @@ services:
       HINDSIGHT_DB_URL: postgres://hindsight:${HINDSIGHT_DB_PASSWORD}@hindsight-db:5432/hindsight
       HINDSIGHT_API_LLM_API_KEY: ${LITELLM_MASTER_KEY}
       HINDSIGHT_API_LLM_BASE_URL: http://litellm:4000/v1
-      # Cheap model for high-frequency entity extraction during retain()
-      HINDSIGHT_API_LLM_MODEL: ollama/gemma4
+      # Cheap/smaller model for high-frequency entity extraction during retain().
+      # Defaults to a smaller NVIDIA model; ollama/gemma4 remains a valid override
+      # for offline/local runs.
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_EXTRACT_MODEL:-nvidia/nemotron-nano}
       # Quality model for low-frequency reflect() synthesis
-      HINDSIGHT_API_REFLECT_MODEL: ${MAIN_MODEL:-anthropic/claude-opus-4-7}
+      HINDSIGHT_API_REFLECT_MODEL: ${MAIN_MODEL:-nvidia/nemotron-ultra}
 
 # Note: NemoClaw is NOT a Docker compose service. It runs on the host
 # as a CLI (Node 22+) and orchestrates an OpenShell-managed sandbox
