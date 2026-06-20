@@ -51,9 +51,37 @@ Per CLAUDE.md §"Substrate-portable application code", the harness is substrate;
 
 ## 4. The four mitigations (entry conditions for the switch)
 
-### Mitigation 1 — Kill-switch watchdog for #2426
+### Mitigation 1 — Gateway liveness trigger for #2426 (thin wrapper, not a recovery engine)
 
-`scripts/hermes_gateway_watchdog.py`: a host-side loop that polls the Hermes gateway health endpoint every 30 s and re-launches it (`nemoclaw` gateway start path) if it stops responding. ~50 lines, zero deps beyond stdlib + the NemoClaw CLI. Fully neutralizes #2426 for Phases 2–5. **Phase 6 entry gate:** either #2426 is closed upstream with a pinned stable release, *or* this watchdog is hardened to production grade (systemd/launchd supervision + alerting) and load-tested against the halt/resume cycle.
+**Division of responsibility (verified in Rung-D testing, 2026-06-20).** NemoClaw
+*owns* gateway recovery — `buildRecoveryScript` (agent/runtime.ts), the on-demand
+`nemoclaw <name> recover`, the full `nemoclaw <name> rebuild`, and `nemoclaw
+<name> doctor`. We must not reimplement any of it. The only thing NemoClaw lacks
+is a *continuous supervisor*: recovery is on-demand, so nothing auto-detects a
+crashed gateway. `scripts/hermes_gateway_watchdog.py` fills exactly that gap and
+nothing more — it polls health and, when down, invokes NemoClaw's *own* `recover`;
+if health is not restored it raises a loud operator ALERT (and escalates to
+NemoClaw's *own* `rebuild --yes` only under the explicit `--allow-rebuild` opt-in,
+since unattended rebuild of the trading brain is itself risky).
+
+**What Rung-D found about the failure modes:**
+- A dropped port-forward → `recover` fixes it in ~1 s. ✓
+- A hard gateway death (SIGKILL) → **not** auto-recovered. NemoClaw's recovery
+  script refuses to relaunch without the security preloads (**#2478**, "refusing
+  unguarded gateway relaunch" — a deliberate guard, not a bug). The reliable fix
+  is `nemoclaw <name> rebuild --yes` (needs the provider credential, e.g.
+  `COMPATIBLE_API_KEY`, in the env), which re-provisions with correct env. Proven:
+  rebuild restored a SIGKILL'd gateway end-to-end.
+- A watchdog bug was found and fixed: `subprocess.run(capture_output=True)` hung
+  for the full timeout because `recover` spawns a background port-forward daemon
+  that holds the captured pipe open. Output is now redirected to a file.
+
+#2426 + #2478 are tracked upstream. **Phase 6 entry gate:** either both are closed
+upstream with a pinned stable release, *or* this trigger is hardened to production
+grade (systemd/launchd supervision, `--allow-rebuild` with alerting, load-tested
+against the halt/resume cycle). For Phases 2–5 (zero capital) the operator-gated
+alert posture is sufficient; NemoClaw's `recover`/`rebuild`/`doctor` are the
+recovery tools and are invoked, not reimplemented.
 
 ### Mitigation 2 — Audited skill-promotion pipeline
 

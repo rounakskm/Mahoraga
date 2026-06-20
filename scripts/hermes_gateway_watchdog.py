@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
-"""Hermes gateway watchdog — Mitigation 1 for NemoClaw issue #2426.
+"""Hermes gateway liveness trigger — Mitigation 1 for NemoClaw issue #2426.
 
-Background
-----------
-NemoClaw issue #2426 (open as of 2026-06-12): if the Hermes gateway is ever
-stopped, NemoClaw cannot bring it back up automatically (PR #2438 fixed only the
-error message, not the recovery path). For a system that will eventually trade
-real capital, an unrecoverable gateway after a halt is unacceptable.
+Division of responsibility (IMPORTANT — do not reinvent NemoClaw)
+----------------------------------------------------------------
+NemoClaw OWNS gateway recovery. It ships the relaunch logic (buildRecoveryScript
+in agent/runtime.ts), the on-demand recovery command (`nemoclaw <name> recover`),
+the full re-provision (`nemoclaw <name> rebuild`), and diagnostics
+(`nemoclaw <name> doctor`). This script must NOT reimplement any of that.
 
-This watchdog neutralizes #2426 for Phases 2-5 (zero capital at risk): it polls
-the Hermes gateway health endpoint and re-launches the gateway when it stops
-responding. See ADR docs/superpowers/specs/2026-06-12-hermes-runtime-migration.md
-section 4, Mitigation 1.
+What NemoClaw does NOT ship is a CONTINUOUS SUPERVISOR — recovery is on-demand,
+so nothing auto-detects a crashed gateway and invokes recovery. That single gap
+is all this watchdog fills: it polls health and, when the gateway is down, calls
+NemoClaw's OWN `recover`. If recover does not restore health, it raises a loud
+operator ALERT (and only escalates to `nemoclaw rebuild` when explicitly opted in
+via --allow-rebuild — rebuilding the trading brain unattended is itself risky).
+
+Why recover can fail (verified in Rung-D testing, 2026-06-20)
+------------------------------------------------------------
+A hard gateway death (e.g. SIGKILL) is NOT auto-recovered: NemoClaw's recovery
+script refuses to relaunch the gateway when the security preloads are missing
+(#2478, "refusing unguarded gateway relaunch") — a deliberate safety guard, not a
+bug to work around. The reliable recovery in that case is `nemoclaw <name> rebuild
+--yes` (requires the provider credential, e.g. COMPATIBLE_API_KEY, in the env),
+which re-provisions with correct env. #2426 + #2478 are tracked upstream; per the
+ADR they are a Phase-6 entry gate, not a Phase 2-5 blocker (zero capital at risk).
+See ADR docs/superpowers/specs/2026-06-12-hermes-runtime-migration.md section 4.
 
 Phase 6 entry gate
 ------------------
@@ -32,9 +45,11 @@ lives in the architecture revision spec section 6 and takes precedence.
 Usage
 -----
     python scripts/hermes_gateway_watchdog.py \
+        --sandbox mahoraga-hermes \
         --health-url http://127.0.0.1:8642/health \
-        --interval 30 \
-        --restart-cmd "nemoclaw mahoraga-trader gateway start"
+        --interval 30
+    # add --allow-rebuild to let it escalate to `nemoclaw rebuild` autonomously
+    # (off by default; requires the provider credential in env).
 
 All flags also read from env (MAHORAGA_WATCHDOG_*). Stdlib only.
 """
@@ -65,24 +80,40 @@ def gateway_healthy(health_url: str, timeout: float) -> bool:
         return False
 
 
-def restart_gateway(restart_cmd: str) -> bool:
-    """Invoke the configured restart command. Return True on exit code 0."""
+def restart_gateway(restart_cmd: str, *, log_path: str | None = None) -> bool:
+    """Invoke the configured restart command. Return True on exit code 0.
+
+    Output is redirected to a FILE (or DEVNULL), never to a captured pipe.
+    `nemoclaw <name> recover` spawns a background port-forward daemon that
+    inherits the child's stdout/stderr fds. With `capture_output=True` the pipe
+    never reaches EOF (the daemon holds the write end open forever), so
+    `subprocess.run` blocks until the timeout and the gateway is never actually
+    recovered — even though `recover` itself finishes in ~1s. Writing to a real
+    file avoids the pipe read; `start_new_session` detaches the daemon from the
+    watchdog's process group. Found in Rung-D testing, 2026-06-12.
+    """
     _log(f"gateway unhealthy — restarting via: {restart_cmd}")
+    log_path = log_path or os.environ.get(
+        "MAHORAGA_WATCHDOG_RESTART_LOG", "/tmp/mahoraga-watchdog-restart.log"
+    )
     try:
-        result = subprocess.run(  # noqa: S603
-            shlex.split(restart_cmd),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        with open(log_path, "ab", buffering=0) as logf:  # noqa: PTH123
+            result = subprocess.run(  # noqa: S603
+                shlex.split(restart_cmd),
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=logf,
+                stderr=logf,
+                start_new_session=True,
+                timeout=180,
+            )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
         _log(f"restart command failed to run: {exc!r}")
         return False
     if result.returncode == 0:
         _log("restart command exited 0")
         return True
-    _log(f"restart command exited {result.returncode}: {result.stderr.strip()[:500]}")
+    _log(f"restart command exited {result.returncode}; see {log_path}")
     return False
 
 
@@ -91,17 +122,50 @@ def _paused() -> bool:
     return os.environ.get("MAHORAGA_WATCHDOG_PAUSED", "").strip() in {"1", "true", "yes"}
 
 
+def restore_gateway(
+    *, sandbox: str, health_url: str, health_timeout: float, allow_rebuild: bool
+) -> bool:
+    """Drive NemoClaw's OWN recovery commands; return True if health restored.
+
+    This is a thin trigger over NemoClaw — it does not implement recovery itself.
+      Tier 1: `nemoclaw <sandbox> recover` (NemoClaw's recovery script).
+      Tier 2: `nemoclaw <sandbox> rebuild --yes` — ONLY if allow_rebuild; heavy
+              re-provision; needs the provider credential (e.g. COMPATIBLE_API_KEY)
+              in the watchdog's env. Recovers a hard gateway death (#2426/#2478).
+    Otherwise: a loud operator ALERT. We never loop-rebuild the trading brain
+    unattended.
+    """
+    restart_gateway(f"nemoclaw {sandbox} recover")
+    if gateway_healthy(health_url, health_timeout):
+        _log("NemoClaw `recover` restored the gateway")
+        return True
+    if allow_rebuild:
+        _log("`recover` insufficient (likely #2478) — escalating to `rebuild --yes`")
+        restart_gateway(f"nemoclaw {sandbox} rebuild --yes")
+        if gateway_healthy(health_url, health_timeout):
+            _log("NemoClaw `rebuild` restored the gateway")
+            return True
+    _log(
+        "ALERT: gateway DOWN and NemoClaw `recover` did not restore it "
+        f"(#2426/#2478). Operator: run `nemoclaw {sandbox} rebuild --yes` with the "
+        "provider credential (e.g. COMPATIBLE_API_KEY) set in the environment."
+    )
+    return False
+
+
 def watch(
     *,
+    sandbox: str,
     health_url: str,
     interval: float,
-    restart_cmd: str,
     health_timeout: float,
     max_restarts_per_hour: int,
+    allow_rebuild: bool,
 ) -> None:
     _log(
-        f"starting — polling {health_url} every {interval:.0f}s "
-        f"(restart cap {max_restarts_per_hour}/h)"
+        f"starting — polling {health_url} every {interval:.0f}s for sandbox "
+        f"'{sandbox}' (restart cap {max_restarts_per_hour}/h, "
+        f"allow_rebuild={allow_rebuild})"
     )
     restart_times: list[float] = []
     while True:
@@ -122,7 +186,12 @@ def watch(
             continue
 
         restart_times.append(now)
-        restart_gateway(restart_cmd)
+        restore_gateway(
+            sandbox=sandbox,
+            health_url=health_url,
+            health_timeout=health_timeout,
+            allow_rebuild=allow_rebuild,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,14 +208,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Seconds between health checks (default 30).",
     )
     parser.add_argument(
-        "--restart-cmd",
-        default=os.environ.get(
-            "MAHORAGA_WATCHDOG_RESTART_CMD",
-            # `nemoclaw <name> recover` = "Restart the sandbox gateway and dashboard
-            # port-forward" (verified against nemoclaw v0.1.0 CLI, 2026-06-12).
-            "nemoclaw mahoraga-hermes recover",
-        ),
-        help="Command run to relaunch the gateway when it is unhealthy.",
+        "--sandbox",
+        default=os.environ.get("MAHORAGA_WATCHDOG_SANDBOX", "mahoraga-hermes"),
+        help="NemoClaw sandbox name; its `recover`/`rebuild` commands are invoked.",
+    )
+    parser.add_argument(
+        "--allow-rebuild",
+        action="store_true",
+        default=os.environ.get("MAHORAGA_WATCHDOG_ALLOW_REBUILD", "").strip()
+        in {"1", "true", "yes"},
+        help="Let the watchdog escalate to `nemoclaw <sandbox> rebuild --yes` when "
+        "`recover` fails (off by default; needs the provider credential in env).",
     )
     parser.add_argument(
         "--health-timeout",
@@ -164,11 +236,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         watch(
+            sandbox=args.sandbox,
             health_url=args.health_url,
             interval=args.interval,
-            restart_cmd=args.restart_cmd,
             health_timeout=args.health_timeout,
             max_restarts_per_hour=args.max_restarts_per_hour,
+            allow_rebuild=args.allow_rebuild,
         )
     except KeyboardInterrupt:
         _log("interrupted — exiting")
