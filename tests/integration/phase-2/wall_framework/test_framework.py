@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from datetime import UTC, date, datetime
+from datetime import date
 
 import pandas as pd
 import pytest
 
 from services.trader.backtest.base import FitnessReport, Strategy
-from services.trader.walls import EvaluationContext, Wall, WallReport
+from services.trader.walls import EvaluationContext, WallReport
 from services.trader.walls.doubles import AlwaysFailWall, AlwaysPassWall
 
 _TICKER = "SPY"
