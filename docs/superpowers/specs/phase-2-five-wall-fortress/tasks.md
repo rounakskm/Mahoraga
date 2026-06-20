@@ -71,14 +71,14 @@ visible.
 - [x] **P2.0.1 [plan]** Read spec.md and tick the section §2 sub-feature list against this `tasks.md` for completeness.  (this PR)
 - [x] **P2.0.2 [plan]** Write `plan.md` capturing 8 sub-features, sequencing, exit criteria.  (this PR)
 - [x] **P2.0.3 [plan]** Write this `tasks.md`.  (this PR)
-- [ ] **P2.0.4 [doc]** Open PR titled "Phase 2 fortress plan + tasks" referencing this directory; merge after operator confirmation.
+- [x] **P2.0.4 [doc]** Open PR titled "Phase 2 fortress plan + tasks" referencing this directory; merge after operator confirmation.  (PR #39)
 
 ## P2.1 — `wall-framework-spec.md` (sub-feature 1)
 
-- [ ] **P2.1.spec [plan]** Author `wall-framework-spec.md`: `Wall` ABC (`evaluate(strategy, backtest_result) → WallReport`), `WallReport` dataclass, `EvaluationContext` carrying the strategy + FitnessReport + per-bar returns. → P2.0 merged
-- [ ] **P2.1.plan + tasks [plan]** → P2.1.spec
-- [ ] **P2.1.code [code]** `services/trader/walls/__init__.py` + `base.py` + `WallReport` dataclass + a stub `AlwaysPassWall` test double. → P2.1.plan
-- [ ] **P2.1.test [test]** ABC contract; stub wall round-trips through the evaluation harness. → P2.1.code
+- [x] **P2.1.spec [plan]** Author `wall-framework-spec.md`: `Wall` ABC (`evaluate(strategy, backtest_result) → WallReport`), `WallReport` dataclass, `EvaluationContext` carrying the strategy + FitnessReport + per-bar returns. → P2.0 merged
+- [x] **P2.1.plan + tasks [plan]** → P2.1.spec
+- [x] **P2.1.code [code]** `services/trader/walls/__init__.py` + `base.py` + `WallReport` dataclass + a stub `AlwaysPassWall` test double. → P2.1.plan
+- [x] **P2.1.test [test]** ABC contract; stub wall round-trips through the evaluation harness. → P2.1.code
 
 ## P2.2 — `wall-1-statistical-rigor-spec.md` (sub-feature 2) ‖ P2.5
 

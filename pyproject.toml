@@ -44,9 +44,10 @@ extend-exclude = [
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RET"]
 
 [tool.ruff.lint.per-file-ignores]
-# `phase-0` / `phase-1` have hyphens by design (match the spec directory naming).
+# `phase-0` / `phase-1` / `phase-2` have hyphens by design (match the spec directory naming).
 "tests/integration/phase-0/**" = ["N999"]
 "tests/integration/phase-1/**" = ["N999"]
+"tests/integration/phase-2/**" = ["N999"]
 
 [tool.mypy]
 python_version = "3.11"
