@@ -1,0 +1,37 @@
+# Lightweight local-dev stack — Postgres only.
+#
+# The full docker-compose.yml brings up Postgres + LiteLLM + Hindsight (+ its own
+# pgvector) and assumes a NemoClaw/Hermes sandbox on the host. For everyday inner-loop
+# work — running the `services/trader/` unit tests and the phase-1/phase-2
+# integration-smoke suites — all you need is the application Postgres. This file is
+# that minimal stack.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d        # start Postgres
+#   uv run pytest tests/integration -m integration -q     # run integration smoke
+#   docker compose -f docker-compose.dev.yml down         # stop
+#
+# It reuses the SAME service name, image, port, migrations, and bind mount as the
+# postgres service in docker-compose.yml, so data and schema are identical to the
+# full stack — you can switch between the two without re-migrating.
+
+name: mahoraga-dev
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mahoraga-postgres
+    ports: ["5432:5432"]
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./infra/postgres/migrations:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+      # PGDATA in a subdir so initdb doesn't trip over `.gitkeep` at the mount root
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

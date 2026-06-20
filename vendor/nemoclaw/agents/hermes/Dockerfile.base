@@ -29,23 +29,29 @@ ARG HERMES_TARBALL_SHA256=1ee1be80a2112b7edc581770cee8858e725ba110cc423979cd7102
 ARG HERMES_UV_EXTRAS="messaging web"
 ARG UV_VERSION=0.11.8
 
+# MAHORAGA-PATCH(2026-06-12): Removed exact apt version pins. Upstream pinned
+# build-specific Debian versions (e.g. libcap2-bin=1:2.66-4+deb12u2+b2) that
+# Debian's stable mirror rotated out on a point-release, breaking the base-image
+# build (apt exit 100 -> onboarding fails). Supply-chain integrity is preserved
+# by the Hermes tarball SHA256 + pinned UV_VERSION above; OS packages now resolve
+# to current bookworm versions. See vendor/nemoclaw/MAHORAGA_CHANGES.md.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3=3.11.2-1+b1 \
-        python3-pip=23.0.1+dfsg-1 \
-        python3-venv=3.11.2-1+b1 \
-        curl=7.88.1-10+deb12u14 \
-        git=1:2.39.5-0+deb12u3 \
-    gnupg=2.2.40-1.1+deb12u2 \
-        ca-certificates=20230311+deb12u1 \
-        iproute2=6.1.0-3 \
-        iptables=1.8.9-2 \
-        libcap2-bin=1:2.66-4+deb12u2+b2 \
-    procps=2:4.0.2-3 \
-    openssh-sftp-server=1:9.2p1-2+deb12u9 \
-        socat=1.7.4.4-2 \
-        dos2unix=7.4.3-1 \
-        jq=1.6-2.1+deb12u1 \
-        vim-tiny=2:9.0.1378-2+deb12u2 \
+        python3 \
+        python3-pip \
+        python3-venv \
+        curl \
+        git \
+        gnupg \
+        ca-certificates \
+        iproute2 \
+        iptables \
+        libcap2-bin \
+        procps \
+        openssh-sftp-server \
+        socat \
+        dos2unix \
+        jq \
+        vim-tiny \
     && rm -rf /var/lib/apt/lists/*
 
 # gosu for privilege separation (gateway vs sandbox user).

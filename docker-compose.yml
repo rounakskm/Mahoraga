@@ -28,6 +28,7 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -37,8 +38,27 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # ── Hindsight memory layer (vectorize-io/hindsight) ───────────────────────
+  # Reconciled 2026-06-20 against the canonical vendored compose at
+  # vendor/hindsight/docker/docker-compose/pg_textsearch/. The earlier wiring
+  # (hindsight-api:v0.5.6, port 8080, HINDSIGHT_DB_URL, plain pgvector) was
+  # speculative and wrong on every count. NOTE: live bring-up is DEFERRED to
+  # Phase 3 (memory is not used before then). The Phase-3 bring-up must verify:
+  #   (a) the custom DB image builds (compiles pgvector + pg_textsearch),
+  #   (b) both extensions are CREATEd in the hindsight DB (Hindsight may auto-create
+  #       via HINDSIGHT_API_*_EXTENSION; otherwise add an init SQL),
+  #   (c) the LiteLLM-routed embedding model's output dimensions match the pgvector
+  #       column dimension (mismatch breaks the index),
+  #   (d) HINDSIGHT_API_LLM_PROVIDER value (openai-compatible vs a native litellm
+  #       provider) against the pinned Hindsight version.
   hindsight-db:
-    image: pgvector/pgvector:pg16
+    # Hindsight needs BOTH pgvector AND Timescale pg_textsearch (BM25). Plain
+    # pgvector is insufficient. Built from the vendored Dockerfile (postgres:17 +
+    # pgvector v0.8.0 + pg_textsearch).
+    build:
+      context: vendor/hindsight/docker/docker-compose/pg_textsearch
+      dockerfile: Dockerfile
+    image: mahoraga/hindsight-db:pg17-pgvector-textsearch
     container_name: mahoraga-hindsight-db
     ports: ["5433:5432"]                    # 5433 on host to avoid conflict with mahoraga-postgres
     volumes:
@@ -56,22 +76,31 @@ services:
       retries: 10
 
   hindsight:
-    image: ghcr.io/vectorize-io/hindsight-api:v0.5.6
+    # Pinned by digest (tag `latest` as of 2026-06-20). Pin a semver tag once
+    # Hindsight publishes one on ghcr.
+    image: ghcr.io/vectorize-io/hindsight@sha256:274704505b2720ac9a5c816c559044c1e8c6b51d47017317ae049ed2952f5ab1
     container_name: mahoraga-hindsight
-    ports: ["8080:8080"]
+    ports: ["8888:8888", "9999:9999"]       # 8888 = API/health/MCP; 9999 = admin
     depends_on:
       hindsight-db:
         condition: service_healthy
       litellm:
         condition: service_started
     environment:
-      HINDSIGHT_DB_URL: postgres://hindsight:${HINDSIGHT_DB_PASSWORD}@hindsight-db:5432/hindsight
-      HINDSIGHT_API_LLM_API_KEY: ${LITELLM_MASTER_KEY}
+      HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:${HINDSIGHT_DB_PASSWORD}@hindsight-db:5432/hindsight
+      HINDSIGHT_API_VECTOR_EXTENSION: pgvector
+      HINDSIGHT_API_TEXT_SEARCH_EXTENSION: pg_textsearch
+      # LLM (reflect/synthesis) routed through our LiteLLM gateway -> Nemotron.
+      HINDSIGHT_API_LLM_PROVIDER: openai            # LiteLLM is OpenAI-compatible
       HINDSIGHT_API_LLM_BASE_URL: http://litellm:4000/v1
-      # Cheap model for high-frequency entity extraction during retain()
-      HINDSIGHT_API_LLM_MODEL: ollama/gemma4
-      # Quality model for low-frequency reflect() synthesis
-      HINDSIGHT_API_REFLECT_MODEL: ${MAIN_MODEL:-anthropic/claude-opus-4-7}
+      HINDSIGHT_API_LLM_API_KEY: ${LITELLM_MASTER_KEY}
+      HINDSIGHT_API_LLM_MODEL: ${MAIN_MODEL:-nvidia/nemotron-ultra}
+      # Embeddings routed through LiteLLM -> an NVIDIA embedding model. The model
+      # must exist as a LiteLLM alias (add to infra/litellm/config.yaml at Phase 3)
+      # and its output dim must match the pgvector column.
+      HINDSIGHT_API_EMBEDDINGS_LITELLM_API_BASE: http://litellm:4000/v1
+      HINDSIGHT_API_EMBEDDINGS_LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
+      HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL: ${HINDSIGHT_EMBED_MODEL:-nvidia/nv-embedqa-e5-v5}
 
 # Note: NemoClaw is NOT a Docker compose service. It runs on the host
 # as a CLI (Node 22+) and orchestrates an OpenShell-managed sandbox
