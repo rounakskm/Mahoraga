@@ -19,7 +19,26 @@ spec §3 ("Three-tier extension model") — Tier 3 patches are last-resort.
 
 ## Modifications
 
-_None yet._
+### 2026-06-12 — Unpin stale apt versions in Hermes base image
+
+- **File:** `agents/hermes/Dockerfile.base` (the `apt-get install` block, ~line 32)
+- **Scope:** Removed exact Debian version pins from the 16 OS packages
+  (`python3`, `curl`, `libcap2-bin`, `socat`, …). Package names retained.
+- **Reason:** Upstream pinned build-specific versions (e.g.
+  `libcap2-bin=1:2.66-4+deb12u2+b2`). Debian's stable mirror keeps only the
+  latest point-release of each package, so once a newer build shipped, the
+  pinned version 404'd and `apt-get install` exited 100 — the Hermes base-image
+  build failed and `nemoclaw onboard --agent hermes` aborted before sandbox
+  creation. Discovered during the 2026-06-12 Rung-C bring-up.
+- **Supply-chain note:** Integrity is still anchored by the upstream
+  `HERMES_TARBALL_SHA256` + pinned `UV_VERSION` (unchanged). Only OS-package
+  exact-version pinning was relaxed.
+- **Upstream-PR status:** Not yet filed. Candidate to upstream to NVIDIA
+  (`apt` exact-pin rot is a recurring base-image issue); track before the next
+  subtree pull so the patch can be dropped if upstream fixes it.
+- **Re-apply on subtree pull:** If a pull reverts this, re-check whether upstream
+  switched to unpinned or snapshot.debian.org pins; re-apply only if still pinned
+  to stale exact versions.
 
 ## Conventions for adding entries
 

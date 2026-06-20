@@ -1,42 +1,69 @@
 #!/usr/bin/env bash
-# Onboard a Mahoraga sandbox via NemoClaw.
-# Phase 0 smoke: brings up one Hermes assistant inside a NemoClaw-hardened sandbox.
-# (Harness migrated OpenClaw -> Hermes 2026-06-12; see ADR 2026-06-12-hermes-runtime-migration.md.)
+# Onboard the Mahoraga Hermes sandbox via NemoClaw (v0.1.0), reproducibly.
+# Harness migrated OpenClaw -> Hermes 2026-06-12; see
+# docs/superpowers/specs/2026-06-12-hermes-runtime-migration.md.
 #
-# NemoClaw v0.1.0 ships an INTERACTIVE TUI wizard for `nemoclaw onboard`. It does
-# NOT take --blueprint / --inference-provider / --inference-base-url flags; the
-# operator answers the wizard's questions about provider, model, credentials, and
-# channels. Running this script invokes the TUI directly. To skip prompts entirely,
-# pass --non-interactive (note: that flag's behavior depends on the release; current
-# v0.1.0 still prompts for some inputs).
+# This encodes the exact non-interactive flow validated during the 2026-06-12
+# Rung-C bring-up: Hermes routes through our LiteLLM gateway (compatible-endpoint)
+# to nvidia/nemotron-ultra, with Ollama available as a LiteLLM fallback.
+#
+# IMPORTANT — the localhost vs host.docker.internal gotcha:
+#   NemoClaw validates the inference endpoint HOST-SIDE during onboarding, where
+#   `localhost:4000` reaches LiteLLM. But the OpenShell gateway forwards inference
+#   from INSIDE its own bridge-network container, where `localhost:4000` is the
+#   container itself (nothing there) -> runtime 503 "inference service unavailable".
+#   Fix: onboard with localhost:4000 (validation passes), then repoint the provider
+#   to host.docker.internal:4000 (reachable from the gateway container). This script
+#   does both.
 set -euo pipefail
 
-# Verify prerequisites
+cd "$(dirname "$0")/.."
+
+# ── Prerequisites ────────────────────────────────────────────────
 command -v nemoclaw >/dev/null 2>&1 || { echo "FATAL: nemoclaw CLI not on PATH"; \
   echo "   Run: cd vendor/nemoclaw && npm install && npm link"; exit 2; }
-command -v ollama   >/dev/null 2>&1 || { echo "FATAL: ollama not on PATH"; exit 2; }
+command -v openshell >/dev/null 2>&1 || { echo "FATAL: openshell CLI not on PATH"; exit 2; }
 test -f .env || { echo "FATAL: .env missing — copy .env.example and fill in"; exit 2; }
 
-# Load env (so any $VAR the wizard reads from environment is available)
 set -a
 # shellcheck disable=SC1091
 source .env
+# shellcheck disable=SC1091
+source infra/nemoclaw/onboard.env
 set +a
 
-echo "Launching nemoclaw onboard (interactive TUI wizard)..."
-echo "  - When prompted for provider, choose 'compatible-endpoints' (LiteLLM gateway)"
-echo "  - Base URL: \${LITELLM_BASE_URL:-http://litellm:4000/v1}  =  ${LITELLM_BASE_URL:-http://litellm:4000/v1}"
-echo "  - API key: paste \${LITELLM_MASTER_KEY}  (we already exported it)"
-echo "  - Model: ollama/gemma4  (the LiteLLM alias)"
-echo "  - Telegram: skip (Phase 6 concern) unless you have a bot ready"
-echo
+: "${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY must be set in .env}"
 
-# Pass through any flags the operator wants (e.g., --non-interactive, --recreate-sandbox).
-# --agent hermes selects the Hermes harness (default agent in NEMOCLAW_AGENT, onboard.env).
-nemoclaw onboard --agent "${NEMOCLAW_AGENT:-hermes}" --yes-i-accept-third-party-software "$@"
+SANDBOX="${NEMOCLAW_SANDBOX_NAME:-mahoraga-hermes}"
+GATEWAY="${OPENSHELL_GATEWAY:-nemoclaw}"
+MODEL="${NEMOCLAW_MODEL:-nvidia/nemotron-ultra}"
+RUNTIME_ENDPOINT="${MAHORAGA_RUNTIME_ENDPOINT:-http://host.docker.internal:4000}"
+
+# onboard.env exports NEMOCLAW_ENDPOINT_URL=http://localhost:4000 (host-side
+# validation) + NEMOCLAW_PROVIDER=custom + COMPATIBLE_API_KEY=$LITELLM_MASTER_KEY.
+echo "==> [1/4] nemoclaw onboard --agent hermes (sandbox=$SANDBOX model=$MODEL)"
+nemoclaw onboard --agent "${NEMOCLAW_AGENT:-hermes}" --non-interactive --no-gpu --yes \
+  --yes-i-accept-third-party-software --name "$SANDBOX" "$@"
+
+echo "==> [2/4] Repoint inference endpoint to $RUNTIME_ENDPOINT (gateway-container reachable)"
+openshell provider update compatible-endpoint -g "$GATEWAY" \
+  --config "OPENAI_BASE_URL=$RUNTIME_ENDPOINT"
+
+echo "==> [3/4] Ensure port-forward 8642 is up"
+openshell forward start --background 8642 "$SANDBOX" 2>/dev/null \
+  || echo "    (forward already active)"
+
+echo "==> [4/4] Smoke test: health + a real prompt through Nemotron Ultra"
+sleep 2
+curl -sf -m 10 http://127.0.0.1:8642/health && echo "  <- gateway healthy"
+code=$(curl -s -m 120 http://127.0.0.1:8642/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Reply with exactly: MAHORAGA HERMES LIVE"}],"stream":false}' \
+  -o /tmp/onboard_smoke.json -w "%{http_code}")
+echo "  chat http=$code -> $(python3 -c "import json;print(json.load(open('/tmp/onboard_smoke.json'))['choices'][0]['message']['content'][:80])" 2>/dev/null)"
 
 echo
-echo "Onboard wizard exited. Verify with:"
-echo "  nemoclaw list                         # see registered sandboxes"
-echo "  nemoclaw <name> status                # health + NIM status"
-echo "  pytest tests/integration/phase-0 -m integration -v"
+echo "Done. Manage with:"
+echo "  nemoclaw list"
+echo "  nemohermes $SANDBOX status | logs --follow | connect"
+echo "  python scripts/hermes_gateway_watchdog.py   # kill-switch watchdog (bug #2426)"
