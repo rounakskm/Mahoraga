@@ -40,6 +40,22 @@ spec §3 ("Three-tier extension model") — Tier 3 patches are last-resort.
   switched to unpinned or snapshot.debian.org pins; re-apply only if still pinned
   to stale exact versions.
 
+### 2026-06-20 — Add `mcp` extra to the Hermes base image
+
+- **File:** `agents/hermes/Dockerfile.base` (`HERMES_UV_EXTRAS` build arg, ~line 29)
+- **Scope:** `"messaging web"` -> `"messaging web mcp"`.
+- **Reason:** The stock image omits the `mcp` extra, so the `mcp` Python package
+  is absent and Hermes cannot act as an MCP **client** over any transport (HTTP
+  fails with "mcp.client.streamable_http is not available"; stdio fails with
+  "StdioServerParameters is not defined"). The agent venv is read-only, so the
+  package can't be added at runtime — it must be baked into the image. Required
+  for the Hindsight memory integration: Hermes reaches Hindsight via its MCP
+  server. `mcp` is a first-class Hermes extra (`Provides-Extra: mcp`).
+- **Upstream-PR status:** Not filed. Worth proposing to NVIDIA that the NemoClaw
+  Hermes image include `mcp` by default (or expose HERMES_UV_EXTRAS at onboard).
+- **Re-apply on subtree pull:** re-check `HERMES_UV_EXTRAS`; re-add `mcp` if a pull
+  reverts it.
+
 ## Conventions for adding entries
 
 When a Tier 3 patch is applied:

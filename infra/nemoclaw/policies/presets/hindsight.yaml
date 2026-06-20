@@ -1,0 +1,34 @@
+# Mahoraga egress preset — Hindsight memory layer (MCP + REST) via host gateway.
+# Modeled on NemoClaw's local-inference preset: the sandbox reaches host services
+# at `host.openshell.internal`, and OpenShell's SSRF guard requires the resolved
+# private host-gateway IP to be explicitly allowlisted. Hindsight publishes its
+# API/health/MCP on host port 8888. Applied with:
+#   nemoclaw mahoraga-hermes policy-add --from-file infra/nemoclaw/policies/presets/hindsight.yaml
+preset:
+  name: hindsight
+  description: "Hindsight memory layer (REST + MCP) via host gateway"
+
+network_policies:
+  hindsight:
+    name: hindsight
+    endpoints:
+      - host: host.openshell.internal
+        port: 8888
+        protocol: rest
+        enforcement: enforce
+        allowed_ips:
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+          - allow: { method: DELETE, path: "/**" }
+    # OpenShell egress is enforced PER-BINARY. Allow the Hermes runtime (python
+    # venv + hermes launcher) and curl (for diagnostics) to reach Hindsight.
+    binaries:
+      - { path: /usr/local/bin/hermes }
+      - { path: /opt/hermes/.venv/bin/python }
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/node }
+      - { path: /usr/bin/curl }
