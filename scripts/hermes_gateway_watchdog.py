@@ -142,7 +142,9 @@ def main(argv: list[str] | None = None) -> int:
         "--restart-cmd",
         default=os.environ.get(
             "MAHORAGA_WATCHDOG_RESTART_CMD",
-            "nemoclaw mahoraga-trader gateway start",
+            # `nemoclaw <name> recover` = "Restart the sandbox gateway and dashboard
+            # port-forward" (verified against nemoclaw v0.1.0 CLI, 2026-06-12).
+            "nemoclaw mahoraga-hermes recover",
         ),
         help="Command run to relaunch the gateway when it is unhealthy.",
     )

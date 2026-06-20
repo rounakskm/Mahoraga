@@ -7,12 +7,13 @@ egress:
     - http://litellm:4000
     # Application database
     - http://postgres:5432
-    # Hermes harness phone-home (skills sync, update check, pairing).
-    # Added 2026-06-12 with the OpenClaw -> Hermes migration. Required for the
-    # gateway to start and for the self-evolving skills hub; scoped to Nous hosts.
+    # Hermes harness phone-home. Per the vendored agent manifest
+    # (agents/hermes/manifest.yaml: phone_home_hosts) these are the two endpoints
+    # the agent needs. NemoClaw's Hermes baseline policy already grants the agent
+    # runtime its Nous endpoints + PyPI + NVIDIA inference; these entries make the
+    # Mahoraga policy explicit/auditable. Added 2026-06-12 with the OpenClaw -> Hermes migration.
     - https://nousresearch.com
     - https://hermes-agent.nousresearch.com
-    - https://api.nousresearch.com
     # Phase 1 — market data (free APIs first)
     - https://query1.finance.yahoo.com         # yfinance
     - https://api.alpaca.markets                # Alpaca free tier

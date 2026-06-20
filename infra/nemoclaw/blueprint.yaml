@@ -1,5 +1,12 @@
-# NemoClaw blueprint for Mahoraga.
-# Driven by `nemoclaw onboard --agent hermes` (see onboard.env).
+# NemoClaw blueprint for Mahoraga — DESIGN-INTENT DOCUMENTATION.
+#
+# NOTE (verified 2026-06-12): NemoClaw v0.1.0 does NOT consume this file. Sandbox
+# provisioning is imperative — `nemoclaw onboard --agent hermes` (env vars in
+# onboard.env) + `nemoclaw <name> policy-add` + `channels add`. This file records
+# the INTENDED shape (role, inference, policies, channels) as the source of truth
+# for review; the live wiring is applied by scripts/onboard.sh and the policy/
+# channel commands. Keep it in sync with what onboarding actually sets.
+#
 # Architecture anchors:
 #   2026-04-26-architecture-revision-consolidated-assistant.md (one assistant per sandbox)
 #   2026-06-12-hermes-runtime-migration.md (OpenClaw -> Hermes harness swap)
@@ -29,12 +36,11 @@ agent:
     model: ${MAIN_MODEL:-anthropic/claude-opus-4-7}
     fallback: [ollama/gemma4]
 
-  # Hermes gateway. NemoClaw bridges the host-facing port to the sandbox-internal
-  # gateway (Hermes binds 127.0.0.1 internally; OpenShell forwards). API server is
-  # bearer-auth'd — key supplied via onboard.env (HERMES_API_SERVER_KEY).
+  # Hermes gateway. Per the vendored agent manifest (agents/hermes/manifest.yaml):
+  # OpenAI-compatible API + health endpoint on port 8642, forwarded to the host.
+  # Auth is bearer-token via the API_SERVER_KEY env (web_auth_method: bearer_token).
   gateway:
-    api_server_host: 127.0.0.1
-    api_server_port: 18642        # sandbox-internal; bridged to host 8642 by OpenShell
+    api_server_port: 8642         # health: GET http://127.0.0.1:8642/health ; API: /v1
     auth: bearer                  # API_SERVER_KEY required; never run unauthenticated
 
   subagents_dir: subagents/
