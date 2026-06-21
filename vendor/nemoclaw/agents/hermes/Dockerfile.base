@@ -26,7 +26,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Calver tag v2026.4.23 = semver 0.11.0.
 ARG HERMES_VERSION=v2026.4.23
 ARG HERMES_TARBALL_SHA256=1ee1be80a2112b7edc581770cee8858e725ba110cc423979cd7102492504bc6b
-ARG HERMES_UV_EXTRAS="messaging web"
+# MAHORAGA-PATCH(2026-06-20): added `mcp` extra. The stock image ships only
+# "messaging web", so the `mcp` Python package is absent and Hermes cannot act as
+# an MCP client over ANY transport (HTTP: missing mcp.client.streamable_http;
+# stdio: "StdioServerParameters is not defined"). The venv is read-only, so the
+# extra must be baked in at build time. `mcp` is a valid Hermes extra
+# (Provides-Extra: mcp -> mcp<2,>=1.2.0). Required for the Hindsight memory layer
+# (Hermes connects to Hindsight's MCP server). See vendor/nemoclaw/MAHORAGA_CHANGES.md.
+ARG HERMES_UV_EXTRAS="messaging web mcp"
 ARG UV_VERSION=0.11.8
 
 # MAHORAGA-PATCH(2026-06-12): Removed exact apt version pins. Upstream pinned

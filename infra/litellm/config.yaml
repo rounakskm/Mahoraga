@@ -45,6 +45,13 @@ model_list:
       api_base: https://integrate.api.nvidia.com/v1
       api_key: os.environ/NVIDIA_API_KEY
 
+  # NOTE: Hindsight embeddings are NOT routed through LiteLLM. NVIDIA's retrieval
+  # embedding models (nv-embedqa-*) are asymmetric and hard-require an `input_type`
+  # param that the OpenAI embeddings API has no field for, so LiteLLM can't proxy
+  # them cleanly. Hindsight uses its built-in local embeddings (BAAI/bge-*) instead
+  # — see the hindsight service in docker-compose.yml. Only Hindsight's LLM
+  # (reflect/synthesis) routes through this gateway.
+
   # Cloud fallback — Anthropic. Only used when ANTHROPIC_API_KEY is real.
   - model_name: anthropic/claude-opus-4-7
     litellm_params:
