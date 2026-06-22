@@ -10,6 +10,8 @@ dependencies = [
     "pandas-market-calendars>=4.4",
     "psycopg[binary]>=3.2",
     "pyyaml>=6",
+    "risklabai>=2.0.1",
+    "quantstats>=0.0.81",
 ]
 
 [project.optional-dependencies]
