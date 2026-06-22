@@ -1,137 +1,69 @@
-# Phase 2 — Five-Wall Fortress Plan
+# Phase 2 — Anti-Overfitting Fortress Plan
 
-**Status:** Drafted 2026-05-11
-**Spec:** [`spec.md`](spec.md) (approved 2026-04-26)
-**Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
-**Predecessor:** Phase 1 (implementation-complete; `phase-1-complete` tag pending operator confirmation)
-**Phase duration:** 6 weeks, 3-stream parallelism
+**Status:** Drafted 2026-05-11; **revised 2026-06-22** (real-data, RiskLabAI stack, 4 walls + 3 gates)
+**Spec:** [`spec.md`](spec.md)
+**Predecessor:** Phase 1 complete; P2.1 wall framework merged (PR #40)
 
 ---
 
 ## 1. Plan summary
 
-Ship the anti-overfitting fortress in **eight sub-features**, each
-with its own `<feature>-spec.md` + `<feature>-plan.md` + `<feature>-tasks.md`
-under this directory. By Phase 2 exit, any candidate strategy can be
-evaluated against five walls + a three-gate system in <30 s, and the
-calibration suite proves the fortress correctly accepts a known-good
-strategy and rejects a deliberate-overfit canary.
+Ship the anti-overfitting fortress as **6 sub-features** (was 8 — synthetic-data dropped, Data-Discipline folded into Wall 1), each its own `spec → plan → tasks` chain. By exit, any candidate strategy is evaluable against **4 walls + a 3-gate system** in <30 s, and a **real-data** calibration suite proves the fortress accepts a known-good strategy (Faber 200-day SMA on SPY) and rejects a deliberate-overfit canary, with **PBO as the discriminator**.
 
-By Phase 2 exit, downstream phases consume:
+Downstream (Phase 3) consumes:
+- `Wall.evaluate(ctx) → WallReport` per wall (4, deterministic, unit-tested).
+- `GateSystem.evaluate(ctx) → GateReport` (3 gates, AND-aggregated).
+- A versioned real-data calibration suite the autoresearch loop reads directly.
 
-- A `Wall.evaluate(strategy, backtest_result) → WallReport` predicate
-  per wall, all 5 deterministic and unit-tested.
-- A `GateSystem.evaluate(strategy, backtest_result) → GateReport`
-  that runs the 3 gates and aggregates pass/fail.
-- A `synthetic-data` library that produces statistically faithful
-  scenarios (GBM with regime switching, jump-diffusion crashes,
-  historical-analogue paths, BTC-aware fat-tail variants).
-- A calibration suite — versioned known-good + known-bad strategies
-  — that any Phase-3 mutation engine can read directly.
+The walls are the **fitness predicate** of the Phase-3 loop — strategies are *learned* there, not hand-authored here; the walls must exist first.
 
-## 2. Sub-features (8 total)
+## 2. Sub-features (6 total)
 
-Each becomes its own spec → plan → tasks chain inside
-`phase-2-five-wall-fortress/`. Streams A (walls 1/3/5), B (wall 4 +
-synthetic-data), and C (gates + calibration) run in parallel after
-the wall ABC ships in P2.0.
+| # | Sub-feature | Depends on | Spec filename |
+|---|---|---|---|
+| 1 | **Wall framework + `Wall` ABC** | Phase 1 P1.6 | `wall-framework-spec.md` ✅ merged |
+| 2 | **Wall 1 — Statistical Rigor** (PBO + DSR/PSR + CPCV + PIT-eval leak check; RiskLabAI + quantstats) | (1) | `wall-1-statistical-rigor-spec.md` |
+| 3 | **Wall 2 — Complexity Control** (sensitivity + stability + MDL) | (1) + Phase 1 P1.6 | `wall-2-complexity-control-spec.md` |
+| 4 | **Wall 3 — Generalization** (walk-forward + multi-regime; cross-asset deferred) | (1) + Phase 1 P1.5 | `wall-3-generalization-spec.md` |
+| 5 | **Wall 4 — Meta-Awareness** (trial-budget tracker + KB forbidden stub) | (1) | `wall-4-meta-awareness-spec.md` |
+| 6 | **Three-gate system + real-data calibration** (fitness/robustness/risk + Faber/overfit suite) | (2)–(5) | `gate-system-spec.md` |
 
-| # | Sub-feature | Stream | Depends on | Spec filename |
-|---|---|---|---|---|
-| 1 | **Wall framework + `Wall` ABC** | A (critical path) | Phase 1 P1.6 (Backtest) | `wall-framework-spec.md` |
-| 2 | **Wall 1 — Statistical Rigor** (DSR + PBO + Monte Carlo + bootstrap) | A | (1) | `wall-1-statistical-rigor-spec.md` |
-| 3 | **Wall 2 — Data Discipline** (combinatorial PCV + PIT-eval enforcement) | A | (1) + Phase 1 P1.3 | `wall-2-data-discipline-spec.md` |
-| 4 | **Wall 3 — Complexity Control** (sensitivity + stability + MDL) | A | (1) | `wall-3-complexity-control-spec.md` |
-| 5 | **Wall 4 — Generalization** (cross-asset + multi-regime + ensemble diversity) | B | (1) + (8) `synthetic-data` | `wall-4-generalization-spec.md` |
-| 6 | **Wall 5 — Meta-Awareness** (trial-budget tracking + KB forbidden-pattern check) | A | (1); Hindsight integration deferred to Phase 3 | `wall-5-meta-awareness-spec.md` |
-| 7 | **Three-gate system + integration** (fitness / robustness / risk gates + canary calibration) | C | (2)–(6) | `gate-system-spec.md` |
-| 8 | **`synthetic-data` library** | B | Phase 1 P1.5 regime detector (regime taxonomy) | `synthetic-data-spec.md` |
+**Dropped:** synthetic-data library. **Folded:** original Wall-2 Data-Discipline → Wall 1 (CPCV). **Deferred:** cross-asset Wall-3 rotation (needs >1 instrument); fundamentals selection layer (separate design, not a wall).
 
 ## 3. Decisions to lock at sub-spec time
 
-| Decision | Default if undecided |
+| Decision | Default |
 |---|---|
-| **PBO threshold** (Wall 1 reject if PBO ≥ ?) | 0.30 per spec.md §2. Tune after calibration. |
-| **Monte Carlo permutation count** | 1,000 shuffles minimum per evaluation; 10,000 if profile says we can afford it. |
-| **PCV split count** | 6 train / 2 test combinatorial splits (López de Prado default). |
-| **Synthetic-data per-regime tolerance** | ±15% on realized vol vs the historical regime sample. Calibrated against the Phase-1 vault holdout. |
-| **Calibration "known-good" strategy** | 12-1 momentum (Jegadeesh-Titman) — published, replicable, baseline. |
-| **Calibration "known-bad" strategy** | Deliberate over-fit on a specific 2020-Q1 vol window. |
-| **Trial-budget tracking shape (Wall 5)** | Local Postgres counter for Phase 2; Hindsight integration ships in Phase 3 alongside the autoresearch-loop curator. |
+| **PBO reject threshold** | 0.30; tune against the calibration pair |
+| **CPCV split count** | RiskLabAI CSCV, S (n_partitions) even, e.g. 16 → C(16,8) paths; tune for variance vs cost |
+| **Effective-independent-trials (DSR)** | correlation-adjusted N (RiskLabAI uses raw N → anti-conservative); estimator chosen in the Wall-1 sub-spec |
+| **Calibration known-good** | **Faber 200-day SMA timing on SPY** (Faber 2007) — published, replicable, single-asset |
+| **Calibration known-bad** | deliberate over-fit (multi-param SMA/threshold grid-searched to one window, e.g. 2020 COVID) |
+| **Trial-budget tracking (Wall 4)** | local Postgres counter for Phase 2; Hindsight wiring in Phase 3 |
 
-## 4. Sequencing — 6 weeks, 3 streams
+## 4. Stack
 
-Same week-by-week table as spec §5, refined with concrete sub-feature
-filenames:
+- **RiskLabAI** (BSD-3): PBO/CSCV, DSR/PSR, CPCV. Validated mathematically correct.
+- **quantstats** (Apache-2.0): Sharpe/Sortino/CVaR/drawdown/tearsheets.
+- pandas 3.0.3 / numpy 2.4.6 (already resolved; Phase-1 suite green).
+- **RiskLabAI wrapper** (`services/trader/walls/`): assemble DSR (no one-call fn); feed effective-independent-N; NaN-guard PBO inputs.
 
-| Week | Stream A (Walls 1/2/3/5) | Stream B (Wall 4 + synthetic-data) | Stream C (Gates) |
-|---|---|---|---|
-| 1 | `wall-framework-spec.md` + `Wall` ABC + `WallReport` dataclass; `wall-1-statistical-rigor-spec.md`; DSR + PBO scaffolds | `synthetic-data-spec.md`; GBM + regime-switching baseline | `gate-system-spec.md` skeleton: ABC + `GateReport` dataclass |
-| 2 | Wall 1: Monte Carlo permutation + bootstrap CI | synthetic-data: jump-diffusion + BTC-aware variants | Fitness gate (DSR + sharpe + win-rate thresholds) |
-| 3 | `wall-2-data-discipline-spec.md`; combinatorial PCV + PIT-eval enforcement | Wall 4 (cross-asset + multi-regime testing) | Robustness gate (PCV + sensitivity must agree) |
-| 4 | `wall-3-complexity-control-spec.md`; sensitivity + MDL + stability tests | Wall 4 (ensemble diversity via synthetic perturbation) | Risk gate (max-drawdown + tail-loss thresholds) |
-| 5 | `wall-5-meta-awareness-spec.md`; trial-budget tracker + KB forbidden-pattern stub | synthetic-data validation (realized stats per regime) | Gate-system integration + canary calibration suite |
-| 6 | All-walls integration test + perf measurement (target <30 s/candidate) | Synthetic-data fidelity report | Full pipeline integration; known-good promotion, known-bad rejection |
+## 5. Mahoraga-specific notes
 
-## 5. Mahoraga-specific implementation notes
+- **Substrate-portable:** every wall + gate lives at `services/trader/walls/`, `services/trader/gates/`. No NemoClaw/OpenShell imports; Phase-3 adapters call them as plain functions.
+- **Phase-1 deps the walls consume:** `backtest.FitnessReport` + the per-bar return series; `regime.CompositeRegime` (multi-regime, Wall 3); `features.BUILTIN_FEATURES` (sensitivity, Wall 2).
+- **Calibration is a CI gate:** the "known-good promoted / known-bad rejected" assertion lands in `tests/integration/phase-2/calibration/` and runs in `integration-smoke` on real SPY data — not an operator script.
 
-### 5.1 Substrate-portable Python
+## 6. Sequencing
 
-Per CLAUDE.md §Practices: every wall + gate + synthetic-data lives
-at `services/trader/walls/`, `services/trader/gates/`,
-`services/trader/synthetic/`. No NemoClaw / OpenClaw / OpenShell
-imports. Phase-3 autoresearch-loop adapters live in
-`infra/nemoclaw/` and call the walls as Python functions.
-
-### 5.2 Cherry-pick candidates from `vendor/`
-
-- **López de Prado reference implementations** — if a third-party
-  implementation of DSR / PBO / PCV exists under MIT/Apache in the
-  ecosystem, cherry-pick into `services/trader/walls/` with
-  attribution per the existing `vendor/_external_refs/` pattern.
-  Otherwise implement against the published papers (Bailey & López
-  de Prado 2014 for DSR; López de Prado 2015 for PBO).
-
-### 5.3 Phase-1 dependencies
-
-The walls consume:
-- `services/trader/backtest/FitnessReport` — every wall takes one
-  + the strategy ABC + the backtest's per-bar return series
-- `services/trader/regime/CompositeRegime` for multi-regime
-  validation (Wall 4) and synthetic-data regime-switching
-- `services/trader/features/BUILTIN_FEATURES` registry — sensitivity
-  testing perturbs feature inputs and re-runs the backtest
-
-### 5.4 Calibration as a CI gate
-
-The Phase-2 exit criterion §3 — "known-good strategy promoted,
-known-bad rejected" — must be a CI assertion, not an operator-run
-script. Lands in `tests/integration/phase-2/calibration/` and runs
-in the `integration-smoke` job alongside the Phase-1 chains.
-
-## 6. Risks (carried from spec §6 + new at plan time)
-
-| Risk | Mitigation |
-|---|---|
-| Wall 1 statistical rigor is research-heavy | Implement against published references; validate against published examples; cherry-pick reference impls where licensing allows |
-| Synthetic-data fidelity drift | Per-regime realized-stats validation; tolerance in `synthetic-data-spec.md`; BTC-aware fat-tail explicitly documented |
-| Performance — 30 s/candidate target | Profile Wall 1 (Monte Carlo permutation) first; vectorize aggressively; fall back to parallel evaluation across walls if needed |
-| Wall calibration drift over years | Calibration suite versioned in git; annual operator review documented in `wall-calibration-spec.md` §maintenance |
-| Hindsight integration premature in Wall 5 | Phase-2 Wall 5 uses a local Postgres trial-counter; Hindsight wiring is a Phase-3 concern alongside the autoresearch-loop curator |
+P2.1 (framework) ✅ → **P2.2 Wall 1** (next) → P2.3 Wall 2 ‖ P2.4 Wall 3 ‖ P2.5 Wall 4 (parallel after Wall 1) → P2.6 gates + calibration → exit. Wall validation uses controlled noise/edge fixtures; the gate calibration uses real SPY.
 
 ## 7. Definition of done
 
-Phase 2 done when:
+- All 6 sub-features' spec/plan/tasks + implementations merged.
+- Walls unit-tested on known-ground-truth fixtures.
+- Calibration green in CI on real SPY: Faber-SMA promoted, overfit canary rejected (PBO discriminator).
+- Full evaluation pipeline <30 s/candidate (measured).
+- All `tests/integration/phase-2/` green; `docs/measurements/phase-2-exit-verification.md` authored; `phase-2-complete` tag (operator confirmation).
 
-- All 8 sub-feature specs / plans / tasks committed
-- All 8 sub-feature implementations merged to `main`
-- Calibration suite green in CI: known-good promoted, known-bad rejected
-- Full evaluation pipeline <30 s per candidate (measured)
-- All `tests/integration/phase-2/` suites green in CI
-- `docs/measurements/phase-2-exit-verification.md` authored
-- `phase-2-complete` tag pushed with operator confirmation
-
-After Phase 2: **Phase 3 — autoresearch loop core.** The walls + gates
-become the predicate the mutation engine evaluates every candidate
-against; the synthetic-data library powers ensemble-diversity
-perturbations.
+After Phase 2: **Phase 3 — autoresearch loop**, which learns strategies and evaluates each against these walls + gates.

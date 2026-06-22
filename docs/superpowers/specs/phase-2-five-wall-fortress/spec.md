@@ -1,62 +1,69 @@
-# Phase 2 — Five-Wall Fortress Spec
+# Phase 2 — Anti-Overfitting Fortress Spec
 
-**Status:** Approved 2026-04-26
+**Status:** Approved 2026-04-26; **revised 2026-06-22** (real-data-only, proven stat libs, 4 walls + 3 gates — see §0)
 **Type:** Phase-level spec
-**Phase duration:** 6 weeks
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
-**Predecessor:** Phase 1
+**Predecessor:** Phase 1; P2.1 wall framework merged (PR #40)
 
 ---
 
+## 0. 2026-06-22 revision (what changed from the original)
+
+Operator decisions reshaped this phase. The original five-wall plan assumed synthetic data, hand-rolled statistics, and a cross-sectional universe. Now:
+
+- **Real data only — no synthetic-data library.** Backtest on actual SPY history. (Original sub-feature "synthetic-data" is **dropped**; cross-asset Wall-4 perturbation is deferred until we trade >1 instrument.)
+- **Proven stat libraries, not hand-rolled.** **RiskLabAI** (BSD-3 — DSR/PSR/PBO/CPCV, validated correct) + **quantstats** (Apache-2.0). Avoid `mlfinlab` (proprietary) and `pypbo` (AGPL).
+- **Latest pandas/numpy** (3.0.3 / 2.4.6); Phase-1 suite verified green on them.
+- **4 walls + 3 gates** (was 5): old "Wall 2 Data Discipline" is folded into Wall 1 (RiskLabAI's CPCV *is* the data-discipline core).
+- **Fundamentals are a future selection layer, not a wall** (separate design). A wall validates; it does not pick stocks or generate alpha.
+
 ## 1. Goal
 
-Build the **anti-overfitting fortress**: 5 independent walls plus 3-gate system, all as testable predicates with empirical calibration. Synthetic-data library for adversarial scenarios (incl. BTC-ETF–aware jump distributions). By Phase 2 exit, any candidate strategy can be evaluated against walls and gates in <30s.
+Build the **anti-overfitting fortress**: 4 independent walls + a 3-gate system, each a deterministic, testable predicate. A wall answers *"is this strategy's edge real, or an artifact of overfitting / luck / fragility?"* — it is the **fitness predicate the Phase-3 autoresearch loop evaluates every learned candidate against**. By Phase 2 exit, any candidate strategy is evaluable against walls + gates in <30 s, and a real-data calibration suite proves the fortress accepts a known-good strategy and rejects a deliberate-overfit canary.
 
 ## 2. Major Sub-Features
 
-Each will get its own SDD feature spec:
+Each gets its own SDD feature spec under this directory.
 
-1. **Wall 1 — Statistical Rigor.** Deflated Sharpe Ratio (DSR), Probability of Backtest Overfitting (PBO < 0.30 required), Monte Carlo permutation testing (real must beat 95% of shuffles), bootstrap confidence intervals.
-2. **Wall 2 — Data Discipline.** Already partially done in Phase 1 (vault embargo at storage); this phase adds combinatorial purged cross-validation (PCV) and PIT-window enforcement at evaluation time.
-3. **Wall 3 — Complexity Control.** Sensitivity analysis (parameter perturbation must not destroy edge), stability testing across rolling windows, Minimum Description Length (MDL) penalty.
-4. **Wall 4 — Generalization.** Cross-asset testing (does it work on similar names?), multi-regime validation, ensemble diversity check via `synthetic-data` perturbation.
-5. **Wall 5 — Meta-Awareness.** Trial-budget tracking (multiple-comparison correction), KB forbidden-pattern check (don't re-explore dead ends), search-process introspection.
-6. **Three-gate system.** Fitness gate, robustness gate, risk gate; all three must pass for promotion. Outputs structured `GateReport` consumed by integration spec §6.4.
-7. **`synthetic-data` library.** GBM with regime switching, jump-diffusion crash scenarios, historical-analogue path generation, BTC-aware jump distributions (BTC ETFs inherit underlying spot BTC vol characteristics — fatter tails, larger jumps).
-8. **Calibration suite.** Known-good (e.g., a published 12-1 momentum) and known-bad (deliberately overfit on a specific window) historical strategies; Phase 2 exit requires walls correctly classifying both.
+1. **Wall framework + `Wall` ABC** — `Wall.evaluate(ctx) → WallReport`, `EvaluationContext`, test doubles. **(P2.1, merged.)**
+2. **Wall 1 — Statistical Rigor.** PBO (the headline overfitting metric, reject if ≥ 0.30), DSR/PSR, combinatorial purged + embargoed CV, PIT-eval leak check. Built on **RiskLabAI** + quantstats.
+3. **Wall 2 — Complexity Control.** Parameter-sensitivity perturbation (±10/20% must not destroy edge), rolling-window stability, MDL penalty for parameter count.
+4. **Wall 3 — Generalization.** Walk-forward / out-of-sample on the SPY history + multi-regime validation (Phase-1 regime detector). *(Cross-asset rotation deferred until >1 instrument.)*
+5. **Wall 4 — Meta-Awareness.** Trial-budget tracking (multiple-comparison count feeding Wall 1's PBO/DSR #-trials); KB forbidden-pattern stub (Hindsight wiring in Phase 3).
+6. **Three-gate system.** Fitness / Robustness / Risk gates; AND aggregation over `WallReport`s → `GateReport`.
+7. **Calibration suite.** Real-data known-good (**Faber 200-day SMA timing on SPY** — Faber 2007) + known-bad (deliberate overfit on one window, e.g. 2020 COVID); Phase-2 exit requires walls/gates promote the good one and reject the bad one.
 
-## 3. Exit Criteria
+## 3. How walls are validated (no hand-picked strategy required)
 
-- Each of 5 walls is a callable predicate with deterministic unit tests
-- Deliberate-overfit canary strategy is rejected by Wall 1 (PBO test) — automated assertion in `tests/integration/phase-2/`
-- Three-gate system passes calibration: known-good strategy promoted, known-bad rejected
-- `synthetic-data` library produces statistically faithful scenarios (realized stats per regime within tolerance of historical)
-- Full evaluation pipeline runs <30s per candidate
+A statistical gate is unit-tested with **controlled return-series fixtures with known ground truth** — the way the RiskLabAI validation worked:
 
-## 4. Dependencies
+- **pure-noise returns → walls REJECT** (PBO ≈ 0.5, DSR low),
+- **injected persistent-edge returns → walls PASS.**
 
-- Phase 1 (data + features + regime detector + backtest harness skeleton)
+This proves wall *correctness* without choosing any trading strategy. The calibration suite (§2.7) then proves *integration* end-to-end on real SPY data.
 
-## 5. Timeline & Sequencing — 6 weeks, 3 parallel streams
+## 4. Exit Criteria
 
-| Week | Stream A (Walls 1, 3, 5) | Stream B (Wall 4 + synthetic-data) | Stream C (Gates) |
-|---|---|---|---|
-| 1 | Wall 1 (DSR + PBO) | synthetic-data: GBM + regime switching | gate skeleton |
-| 2 | Wall 1 (Monte Carlo + bootstrap) | synthetic-data: jump-diffusion (incl. BTC) | fitness gate |
-| 3 | Wall 3 (sensitivity + MDL) | Wall 4 (cross-asset + multi-regime) | robustness gate |
-| 4 | Wall 5 (trial budget + KB forbidden) | Wall 4 (ensemble perturbation) | risk gate |
-| 5 | Wall integration tests | synthetic-data validation | gate calibration |
-| 6 | Canary strategy + integration | known-good/known-bad calibration | full pipeline integration |
+- Each of the 4 walls is a callable, deterministic predicate with unit tests on known-ground-truth fixtures.
+- **PBO is the discriminator:** the overfit canary is rejected; Faber-SMA passes — an automated assertion in `tests/integration/phase-2/calibration/` (runs in `integration-smoke`).
+- Three-gate system passes calibration on **real SPY data**: known-good promoted, known-bad rejected.
+- Full evaluation pipeline runs <30 s per candidate (measured).
+- `docs/measurements/phase-2-exit-verification.md` authored; `phase-2-complete` tag (operator confirmation).
+
+## 5. Dependencies
+
+- Phase 1 (data + features + regime detector + backtest harness). SPY ~10yr daily already loaded (`data/parquet/ohlcv/SPY/`, `scripts/pull_spy_daily.py`).
+- New deps: `RiskLabAI` (BSD-3), `quantstats` (Apache-2.0). Already on pandas 3.0.3 / numpy 2.4.6.
 
 ## 6. Phase-Specific Risks
 
-- **Wall 1 statistical rigor is research-heavy.** PBO and DSR are real research math. Mitigation: implement against published references (Bailey & López de Prado for DSR; López de Prado for PBO); validate against published examples.
-- **Synthetic-data fidelity.** If GBM doesn't match real return distributions, Wall 4 ensemble perturbation is misleading. Mitigation: per-regime realized stats validation; BTC-ETF distribution explicitly fatter-tailed.
-- **Performance.** Walls must run fast or autoresearch loop is throttled. Mitigation: vectorize with numpy/pandas; profile and optimize the slowest wall.
-- **Wall calibration drift.** Today's known-good strategy may not be known-good a decade from now. Mitigation: calibration suite versioned in git; review annually.
+- **RiskLabAI correctness caveats (validated).** No one-call DSR (assemble from `benchmark_sharpe_ratio` + `probabilistic_sharpe_ratio`); it uses raw trial-count N (anti-conservative DSR for correlated strategies → we feed an effective-independent-trials count); NaN in the PBO matrix propagates silently (→ NaN-guard inputs). All three handled in a thin wrapper. RiskLabAI itself reproduces Bailey & López de Prado values exactly.
+- **Performance.** Walls must run fast or the Phase-3 loop is throttled. Vectorize; profile the slowest (PBO/CPCV) first.
+- **Single instrument.** Only SPY → Wall 3 is walk-forward/multi-regime, not cross-asset (deferred). Calibration is single-asset timing rules, not cross-sectional.
+- **Calibration drift.** Today's known-good may not hold in a decade. Calibration suite versioned in git; annual operator review.
 
-## 7. Open Questions for This Phase
+## 7. Open Questions
 
-- Threshold for "known-good" calibration strategy. Mitigation: pick a published strategy (12-1 momentum or RSI-2 mean-reversion) with documented historical performance.
-- Wall 5 KB forbidden-pattern lookup: embedding similarity threshold. Decided in Phase 3 KB integration.
-- Synthetic-data validation tolerance — what % deviation in realized stats is acceptable? Decided in `synthetic-data-spec.md`.
+- PBO reject threshold (default 0.30) and DSR threshold — tune against the calibration pair.
+- Effective-independent-trials estimator for DSR (correlation-adjusted N) — decide in the Wall-1 sub-spec.
+- Wall-4 KB forbidden-pattern similarity threshold — decided in Phase-3 KB integration.
