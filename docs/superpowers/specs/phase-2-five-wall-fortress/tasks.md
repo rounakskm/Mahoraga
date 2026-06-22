@@ -1,6 +1,6 @@
 # Phase 2 — Tasks
 
-**Status:** Drafted 2026-05-11; **revised 2026-06-22** (4 walls + 3 gates, real-data, RiskLabAI; synthetic-data dropped)
+**Status:** ✅ **COMPLETE 2026-06-22** — all sub-features merged (PRs #40/#44/#45/#46). Exit proof on real SPY: Faber promoted, overfit canary rejected (PBO=0.84), 1.25 s/eval. See [`../../../measurements/phase-2-exit-verification.md`](../../../measurements/phase-2-exit-verification.md). Drafted 2026-05-11; revised 2026-06-22.
 **Plan:** [`plan.md`](plan.md)
 
 Work items as a dependency graph so independent items run in parallel. Items below each sub-feature line are owned by that sub-feature's own `<feature>-tasks.md`; re-listed here only to show cross-sub-feature edges.
