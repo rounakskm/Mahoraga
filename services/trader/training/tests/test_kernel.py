@@ -66,3 +66,25 @@ def test_loop_runs_and_fortress_gates():
     assert res.num_promoted <= 4
     if res.best is not None:
         assert set(res.best.windows) == set(REGIMES)  # best is regime-conditional
+
+
+def test_pbo_gated_on_trial_diversity():
+    """eval feeds PBO only when trials are diverse; correlated micro-tweaks skip it."""
+    price = _price()
+    regimes = label_regimes(price)
+    seed = RegimeConditionalStrategy.seed()
+    # near-identical (correlated) trial columns -> PBO must be skipped (N/A)
+    corr = np.column_stack([seed.returns(price, regimes).to_numpy()[-2000:]] * 12)
+    corr = corr + np.random.default_rng(0).normal(0, 1e-9, corr.shape)
+    rep = kernel_eval.evaluate(
+        seed, price, regimes, trial_returns_matrix=corr,
+        trial_sharpes=[0.06] * 12, num_trials=12,
+    ).report
+    assert rep.wall_reports["statistical_rigor"].sub_results["pbo"] is None
+    # genuinely diverse columns (pure noise) -> PBO computed
+    diverse = np.random.default_rng(1).standard_normal((2000, 16))
+    rep2 = kernel_eval.evaluate(
+        seed, price, regimes, trial_returns_matrix=diverse,
+        trial_sharpes=[0.06] * 16, num_trials=16,
+    ).report
+    assert rep2.wall_reports["statistical_rigor"].sub_results["pbo"] is not None

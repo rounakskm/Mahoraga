@@ -10,6 +10,7 @@ PBO/DSR over the multiple-testing set.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -50,8 +51,13 @@ def run_loop(
     iterations: int = 30,
     seed: int = 0,
     gates: GateSystem | None = None,
+    on_iteration: Callable[[Iteration], None] | None = None,
 ) -> CampaignResult:
-    """Hill-climb the regime-conditional strategy on a real price series."""
+    """Hill-climb the regime-conditional strategy on a real price series.
+
+    `on_iteration` is called as each iteration completes — used for live progress
+    during training (the loop is otherwise silent until it returns).
+    """
     rng = np.random.default_rng(seed)
     regimes = label_regimes(price)
     gates = gates or GateSystem()
@@ -85,7 +91,8 @@ def run_loop(
         if is_best:
             result.best, result.best_sharpe = cand, ev.sharpe
             current = cand  # hill-climb: accept the improvement
-        result.iterations.append(
-            Iteration(i, dict(cand.windows), ev.sharpe, promoted, is_best, ev.report.reason)
-        )
+        it = Iteration(i, dict(cand.windows), ev.sharpe, promoted, is_best, ev.report.reason)
+        result.iterations.append(it)
+        if on_iteration is not None:
+            on_iteration(it)
     return result

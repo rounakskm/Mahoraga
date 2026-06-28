@@ -49,23 +49,24 @@ def main() -> int:
     print(f"SPY: {len(price)} bars {price.index[0].date()} -> {price.index[-1].date()}")
     print(f"running {args.iterations} mechanical iterations through the fortress...\n")
 
-    res = run_loop(price, iterations=args.iterations, seed=args.seed)
-
-    rows = pd.DataFrame(
-        {
-            "index": i.index, "sharpe": i.sharpe, "promoted": i.promoted,
-            "is_best": i.is_best, "windows": str(i.windows), "reason": i.reason,
-        }
-        for i in res.iterations
-    )
     out_dir = ROOT / "data/autoresearch"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"run_seed{args.seed}_{len(price)}bars.parquet"
-    rows.to_parquet(out)
+    live = out_dir / f"run_seed{args.seed}_{len(price)}bars.csv"
+    live.write_text("index,sharpe,promoted,is_best,windows,reason\n")
 
-    print(f"promoted {res.num_promoted}/{args.iterations} | best daily Sharpe {res.best_sharpe:.4f}")
+    # Live progress: print each iteration AND append it to the CSV as it completes,
+    # so training is watchable in real time (`tail -f` the CSV from another terminal).
+    def on_iter(it):
+        flag = "BEST" if it.is_best else ("ok " if it.promoted else "   ")
+        print(f"  iter {it.index:3d}  Sharpe {it.sharpe:+.4f}  [{flag}]  {it.reason[:70]}", flush=True)
+        with live.open("a") as fh:
+            fh.write(f'{it.index},{it.sharpe:.6f},{it.promoted},{it.is_best},"{it.windows}","{it.reason}"\n')
+
+    res = run_loop(price, iterations=args.iterations, seed=args.seed, on_iteration=on_iter)
+
+    print(f"\npromoted {res.num_promoted}/{args.iterations} | best daily Sharpe {res.best_sharpe:.4f}")
     print(f"best regime->window: {res.best.windows if res.best else None}")
-    print(f"results -> {out.relative_to(ROOT)}")
+    print(f"live results -> {live.relative_to(ROOT)}")
     return 0
 
 
