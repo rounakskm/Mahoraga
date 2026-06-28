@@ -40,6 +40,27 @@ def _per_regime(returns: pd.Series, regimes: pd.Series) -> dict[str, float]:
     }
 
 
+def _diverse_enough(matrix, min_cols: int = 10, max_abs_corr: float = 0.90) -> bool:
+    """Is the trial set diverse enough for PBO (CSCV) to mean anything?
+
+    PBO's power comes from a sizeable set of GENUINELY DIFFERENT strategies. A
+    mechanical hill-climb of near-identical micro-mutations (200-vs-220 SMA) is
+    ~0.97 correlated, where CSCV becomes high-variance noise (the validated PBO
+    caveat — it bounced 0.01..0.55 on the same Sharpe). Gate PBO on real
+    diversity; the correlated loop relies on DSR + the complexity/generalization/
+    risk gates instead. PBO re-enters at Layer 2+ when the LLM proposes distinct
+    hypotheses (the calibration's diverse crossover grid sits at ~0.82 and still
+    fires PBO=0.84).
+    """
+    m = np.asarray(matrix, float)
+    m = m[:, ~np.isnan(m).any(axis=0)]
+    if m.shape[1] < min_cols:
+        return False
+    c = np.corrcoef(m.T)
+    n = c.shape[0]
+    return ((np.abs(c).sum() - n) / (n * (n - 1))) < max_abs_corr
+
+
 def _perturbed(strategy, price, regimes) -> list[float]:
     """Sharpe under +/-10/20% perturbation of each per-regime window (Wall 2)."""
     out = []
@@ -70,7 +91,8 @@ def evaluate(
         "rolling_sharpes": _walk_forward(returns, folds=8),
         "perturbed_sharpes": _perturbed(strategy, price, regimes),
     }
-    if trial_returns_matrix is not None:
+    # PBO only when the trial set is diverse enough to be reliable (see helper).
+    if trial_returns_matrix is not None and _diverse_enough(trial_returns_matrix):
         metadata["trial_returns_matrix"] = trial_returns_matrix
     if trial_sharpes is not None:
         metadata["trial_sharpes"] = trial_sharpes
