@@ -43,7 +43,6 @@ def _walk_forward_sharpes(returns: pd.Series, folds: int = 5) -> list[float]:
 def _ctx(returns, **metadata) -> EvaluationContext:
     return EvaluationContext(
         strategy=None, backtest_result=None, returns=returns,
-        feature_frame=pd.DataFrame(), regime_frame=pd.DataFrame(),
         universe=["SPY"], metadata=metadata,
     )
 

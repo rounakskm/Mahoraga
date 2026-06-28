@@ -16,8 +16,6 @@ def _ctx(returns=None, **metadata):
         strategy=None,
         backtest_result=None,
         returns=returns if returns is not None else pd.Series([0.001, -0.0005, 0.0008] * 50),
-        feature_frame=pd.DataFrame(),
-        regime_frame=pd.DataFrame(),
         universe=["SPY"],
         metadata=metadata,
     )

@@ -11,7 +11,6 @@ from services.trader.walls.doubles import AlwaysFailWall, AlwaysPassWall
 def _ctx(returns):
     return EvaluationContext(
         strategy=None, backtest_result=None, returns=returns,
-        feature_frame=pd.DataFrame(), regime_frame=pd.DataFrame(),
         universe=["SPY"], metadata={"num_trials": 1},
     )
 

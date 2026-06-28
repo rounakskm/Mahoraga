@@ -25,8 +25,6 @@ class EvaluationContext:
     strategy: Strategy
     backtest_result: FitnessReport
     returns: pd.Series  # per-bar portfolio returns; DatetimeIndex
-    feature_frame: pd.DataFrame  # PIT-correct feature matrix
-    regime_frame: pd.DataFrame  # PIT-correct regime classifications
     universe: list[str]  # ordered ticker list
     metadata: dict[str, object] = field(default_factory=dict)
 

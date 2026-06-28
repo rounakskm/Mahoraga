@@ -75,34 +75,11 @@ def _build_returns() -> pd.Series:
     )
 
 
-def _build_feature_frame() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "sma_20": [float(100 + i) for i in range(len(_BAR_DATES))],
-        },
-        index=_BAR_DATES,
-    )
-
-
-def _build_regime_frame() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "scope": ["universe"] * len(_BAR_DATES),
-            "asof": _BAR_DATES,
-            "meso_label": ["trending_low_vol"] * len(_BAR_DATES),
-            "meso_conf": [0.9] * len(_BAR_DATES),
-            "composite_conf": [0.9] * len(_BAR_DATES),
-        }
-    )
-
-
 def _ctx() -> EvaluationContext:
     return EvaluationContext(
         strategy=_StubStrategy(),
         backtest_result=_build_fitness(),
         returns=_build_returns(),
-        feature_frame=_build_feature_frame(),
-        regime_frame=_build_regime_frame(),
         universe=[_TICKER],
     )
 
