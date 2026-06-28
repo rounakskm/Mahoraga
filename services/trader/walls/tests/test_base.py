@@ -49,8 +49,6 @@ def _stub_ctx() -> EvaluationContext:
         strategy=_StubStrategy(),
         backtest_result=_stub_fitness(),
         returns=returns,
-        feature_frame=pd.DataFrame(),
-        regime_frame=pd.DataFrame(),
         universe=["SPY"],
     )
 
