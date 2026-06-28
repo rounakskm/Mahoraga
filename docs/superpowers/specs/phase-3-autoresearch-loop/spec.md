@@ -12,6 +12,13 @@
 
 **This phase is the heart of Mahoraga.** Everything before it — data, features, regime, the anti-overfitting fortress — exists to serve *this*: a **self-improving loop that learns trading strategies, validates them ruthlessly, keeps what survives, and compounds what it learns over time**. The novel contribution of the whole system is this loop. Phase 1–2 are the substrate; Phase 3 is the point.
 
+**The objective is to adapt to *any* market condition and take better trades.** Concretely, the loop is learning **two coupled things**:
+
+1. **How to read the current market regime** — not just consuming the Phase-1 rule-based detector, but *improving* regime detection itself (its features, thresholds, labels) as a first-class mutation target. Better regime reads are as valuable as better strategies.
+2. **Which strategy works in *that* regime, and how to apply it** — strategies are learned and judged **regime-conditionally**: a candidate is a *(regime → strategy + sizing)* mapping, not a single global rule. The system's edge is matching the right behaviour to the detected condition (e.g. trend-following in trending regimes, mean-reversion in ranging, risk-off in high-vol).
+
+This is why "compounds intelligence, not just capital" is literal: the system gets better at *both* perceiving the market and acting on it, and remembers which pairings worked. Both objectives flow through the existing machinery — Wall 3's `per_regime_sharpes` already judges edge **per regime**, and promotion is **regime-aware** (a candidate can be the leader *for a regime*, not only globally). Layer 1–2 learn regime-conditional strategy selection on the fixed detector; evolving the **detector itself** is an explicit mutation target introduced in Layer 2–3.
+
 The full vision is unchanged:
 - An **LLM-driven research fleet** (the seven roles) that *proposes* strategy mutations grounded in accumulated knowledge,
 - a **kernel** that mutates → backtests → evaluates each candidate through the **Phase-2 fortress**,
@@ -70,7 +77,7 @@ This is the one genuinely hard integration point and the kernel's core. The Phas
 
 The lean 4-piece loop. **No LLM, no agents** — mutation is *mechanical* (parameter search over a strategy template). Proves the loop + fortress integration end-to-end on real SPY with zero nondeterminism.
 
-1. **`strategy_template.py`** — a parametrized strategy + a fixed mutation surface (constants + the body of `signal()`/`position_size()`). Seeded with the SMA/timing family we already calibrated against.
+1. **`strategy_template.py`** — a parametrized, **regime-conditional** strategy: a *(regime label → signal + sizing)* mapping with a fixed mutation surface (constants + the body of `signal()`/`position_size()` per regime). Reads the Phase-1 regime label; seeded with the SMA/timing family we already calibrated against. The mechanical mutator searches the per-regime parameter space.
 2. **`eval.py`** — §2: populate the wall metadata contract + run the `GateSystem`.
 3. **`loop.py`** — mechanical mutate → eval → record; keep the best (beats-master test).
 4. **results store** — every iteration (kept + discarded, with reason) to Postgres `experiments.iterations`; promoted strategies to the git registry with provenance.
@@ -99,7 +106,7 @@ The seven Hermes subagents (per the seven-role amendment, re-grounded): Orchestr
 ## 5. Sub-features by layer
 
 **Layer 1:** `strategy_template.py` · `eval.py` (+ metadata contract) · `loop.py` (mechanical) · `experiments.iterations` schema + writer · git registry + provenance · vault-holdout check
-**Layer 2:** LLM-Hunter mutator (LiteLLM) · mutation-surface safety rails · improvement-rate metric
+**Layer 2:** LLM-Hunter mutator (LiteLLM) · mutation-surface safety rails · improvement-rate metric · **regime-detector as a mutation target** (the loop proposes changes to detection features/thresholds/labels, judged by whether regime-conditional edge improves)
 **Layer 3:** 7 Hermes subagent defs + permission CI guard · Orchestrator cadence + Telegram ops · Planner/Reviewer (Hindsight-grounded) · Researcher · Guardian (fortress veto) · Archivist (Hindsight retain/reflect + markdown notebook) · Reporter · `promote_pipeline`/`refresh_master`/`parse_metric` tools (ported from multiautoresearch) · compressed-history replay engine
 
 ## 6. Risks
