@@ -1,6 +1,7 @@
 # Phase 3 — Autoresearch Loop Spec
 
 **Status:** Approved 2026-04-26; **revised 2026-06-22** (re-grounded on Hermes + Hindsight + the real Phase-2 fortress; delivery re-layered kernel-first — see §0)
+**Delivery:** 🟡 **In progress.** Layer-1 *kernel* SHIPPED + runnable on real SPY (`strategy_template` + `eval` + `loop` + `scripts/run_autoresearch.py`, PRs #49/#50; runbook [`../../../runbooks/autoresearch-training.md`](../../../runbooks/autoresearch-training.md)). **Remaining Layer 1:** real RegimeDetector swap · `experiments.iterations` Postgres + git registry (provenance) · vault-holdout. **Layers 2–3 (LLM mutator, agent fleet): not started.**
 **Type:** Phase-level spec
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md), [`../2026-04-25-nemoclaw-autoresearch-integration.md`](../2026-04-25-nemoclaw-autoresearch-integration.md)
 **Predecessor:** Phases 1 + 2 (complete)
@@ -105,7 +106,7 @@ The seven Hermes subagents (per the seven-role amendment, re-grounded): Orchestr
 
 ## 5. Sub-features by layer
 
-**Layer 1:** `strategy_template.py` · `eval.py` (+ metadata contract) · `loop.py` (mechanical) · `experiments.iterations` schema + writer · git registry + provenance · vault-holdout check
+**Layer 1:** ✅ `strategy_template.py` · ✅ `eval.py` (+ metadata contract) · ✅ `loop.py` (mechanical) + `scripts/run_autoresearch.py` runner + live progress  ·  ⏳ real RegimeDetector swap · ⏳ `experiments.iterations` schema + writer · ⏳ git registry + provenance · ⏳ vault-holdout check
 **Layer 2:** LLM-Hunter mutator (LiteLLM) · mutation-surface safety rails · improvement-rate metric · **regime-detector as a mutation target** (the loop proposes changes to detection features/thresholds/labels, judged by whether regime-conditional edge improves)
 **Layer 3:** 7 Hermes subagent defs + permission CI guard · Orchestrator cadence + Telegram ops · Planner/Reviewer (Hindsight-grounded) · Researcher · Guardian (fortress veto) · Archivist (Hindsight retain/reflect + markdown notebook) · Reporter · `promote_pipeline`/`refresh_master`/`parse_metric` tools (ported from multiautoresearch) · compressed-history replay engine
 
