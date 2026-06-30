@@ -234,3 +234,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 docs/measurements/*.local.md
+
+# Autoresearch run artifacts (durable record is Postgres strategies.registry)
+strategies/*.json
