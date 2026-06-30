@@ -57,6 +57,7 @@ def run_loop(
     seed: int = 0,
     gates: GateSystem | None = None,
     regimes: pd.Series | None = None,
+    detector_features: tuple[pd.Series, pd.Series] | None = None,
     mutator: Callable | None = None,
     on_iteration: Callable[[Iteration], None] | None = None,
 ) -> CampaignResult:
@@ -68,9 +69,13 @@ def run_loop(
     passes `training.llm.LLMMutator`. `on_iteration` gives live progress.
     """
     rng = np.random.default_rng(seed)
-    regimes = label_regimes(price) if regimes is None else regimes.reindex(price.index)
+    # learnable detector: regimes are derived per-candidate from its thresholds;
+    # otherwise a fixed regime series is used for every candidate.
+    learn_detector = detector_features is not None
+    if not learn_detector:
+        regimes = label_regimes(price) if regimes is None else regimes.reindex(price.index)
     gates = gates or GateSystem()
-    mutate = mutator or (lambda cur, _iters, r: cur.mutate(r))
+    mutate = mutator or (lambda cur, _iters, r: cur.mutate(r, mutate_detector=learn_detector))
 
     current = RegimeConditionalStrategy.seed()
     result = CampaignResult()
@@ -79,6 +84,7 @@ def run_loop(
 
     for i in range(iterations):
         cand = current if i == 0 else mutate(current, result.iterations, rng)
+        regs = cand.regimes_for(*detector_features) if learn_detector else regimes
 
         # campaign trial context: PBO/DSR over all trials so far (need >= 2 cols)
         matrix = sharpes = None
@@ -88,7 +94,7 @@ def run_loop(
             sharpes = list(trials_sharpes)
 
         ev = kernel_eval.evaluate(
-            cand, price, regimes,
+            cand, price, regs,
             trial_returns_matrix=matrix, trial_sharpes=sharpes,
             num_trials=i + 1, gates=gates,
         )

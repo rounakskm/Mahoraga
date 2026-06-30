@@ -41,11 +41,21 @@ def label_regimes(price: pd.Series) -> pd.Series:
     return label
 
 
+# Detector thresholds are also a mutation target (Layer 2): the MESO defaults
+# (adx>=25, vol_pct>0.40) ship from Phase 1, but vol_pct ranges [0,100] so 0.40 is
+# mis-scaled (≈always high-vol). Making the threshold learnable lets the loop
+# self-correct toward a balanced regime split without touching Phase-1.
+ADX_T_MIN, ADX_T_MAX = 10.0, 40.0
+VOL_T_MIN, VOL_T_MAX = 5.0, 80.0
+
+
 @dataclass(frozen=True)
 class RegimeConditionalStrategy:
-    """Per-regime SMA-timing windows. The mutation surface is `windows`."""
+    """Per-regime SMA windows + the detector thresholds. Both are mutation targets."""
 
     windows: dict[str, int]
+    adx_threshold: float = 25.0
+    vol_threshold: float = 0.40
 
     @classmethod
     def seed(cls) -> RegimeConditionalStrategy:
@@ -61,6 +71,18 @@ class RegimeConditionalStrategy:
     def num_params(self) -> int:
         return len(self.windows)
 
+    def regimes_for(self, adx: pd.Series, vol_pct: pd.Series) -> pd.Series:
+        """Label each bar with THIS candidate's detector thresholds — the same MESO
+        quadrant logic, parameterized so the loop can learn the detector."""
+        trend = adx >= self.adx_threshold
+        hivol = vol_pct > self.vol_threshold
+        label = pd.Series("ranging_low_vol", index=adx.index)
+        label[trend & ~hivol] = "trending_low_vol"
+        label[trend & hivol] = "trending_high_vol"
+        label[~trend & hivol] = "ranging_high_vol"
+        label[adx.isna() | vol_pct.isna()] = "undefined"
+        return label
+
     def returns(self, price: pd.Series, regimes: pd.Series) -> pd.Series:
         """One-bar-lagged daily returns (no look-ahead): hold when price > the
         current regime's SMA."""
@@ -73,8 +95,18 @@ class RegimeConditionalStrategy:
         signal = (price > sma_at).astype(float)
         return (signal.shift(1) * ret).dropna()
 
-    def mutate(self, rng: np.random.Generator, step: int = 20) -> RegimeConditionalStrategy:
-        """One single-change mutation: nudge one regime's window by +/- step."""
+    def mutate(
+        self, rng: np.random.Generator, step: int = 20, mutate_detector: bool = False
+    ) -> RegimeConditionalStrategy:
+        """One single-change mutation: a regime window, or (when mutate_detector) a
+        detector threshold. Detector mutation only happens in learnable-detector
+        mode — in fixed-regime mode it would be a no-op, so it stays off."""
+        if mutate_detector and rng.random() < 0.35:
+            if rng.random() < 0.5:
+                new = float(np.clip(self.adx_threshold + rng.choice([-2.0, 2.0]), ADX_T_MIN, ADX_T_MAX))
+                return replace(self, adx_threshold=new)
+            new = float(np.clip(self.vol_threshold + rng.choice([-5.0, 5.0]), VOL_T_MIN, VOL_T_MAX))
+            return replace(self, vol_threshold=new)
         regime = rng.choice(list(self.windows))
         delta = int(rng.choice([-step, step]))
         new_w = int(np.clip(self.windows[regime] + delta, WINDOW_MIN, WINDOW_MAX))

@@ -159,6 +159,41 @@ def test_fitness_rewards_quarterly_consistency_and_resilience():
     assert fc.score > fl.score  # the resilient, quarter-consistent series wins on fitness
 
 
+def test_regimes_for_applies_candidate_thresholds():
+    idx = pd.bdate_range("2020-01-01", periods=6)
+    adx = pd.Series([30.0, 30.0, 10.0, 10.0, 30.0, np.nan], index=idx)
+    vol = pd.Series([50.0, 0.1, 50.0, 0.1, 50.0, 50.0], index=idx)  # 0.1<=.40 low, 50>.40 high
+    s = RegimeConditionalStrategy.seed()  # adx_t=25, vol_t=0.40
+    assert list(s.regimes_for(adx, vol)) == [
+        "trending_high_vol", "trending_low_vol", "ranging_high_vol",
+        "ranging_low_vol", "trending_high_vol", "undefined",
+    ]
+    # raising the ADX threshold above 30 flips the adx=30 bars to ranging
+    s2 = RegimeConditionalStrategy(s.windows, adx_threshold=35.0)
+    assert s2.regimes_for(adx, vol).iloc[0] == "ranging_high_vol"
+
+
+def test_mutate_detector_toggles_thresholds_only_when_enabled():
+    s = RegimeConditionalStrategy.seed()
+    rng = np.random.default_rng(0)
+    assert any(
+        (m := s.mutate(rng, mutate_detector=True)).adx_threshold != s.adx_threshold
+        or m.vol_threshold != s.vol_threshold
+        for _ in range(60)
+    )  # with the detector enabled, a threshold eventually moves
+    for _ in range(40):  # disabled -> thresholds never move
+        m = s.mutate(rng, mutate_detector=False)
+        assert m.adx_threshold == s.adx_threshold and m.vol_threshold == s.vol_threshold
+
+
+def test_loop_with_learnable_detector_runs():
+    from services.trader.training.regime import detector_features
+
+    ohlcv = _ohlcv(seed=4)
+    res = run_loop(ohlcv["close"], iterations=4, seed=4, detector_features=detector_features(ohlcv))
+    assert len(res.iterations) == 4  # runs end-to-end (synthetic noise may promote nothing)
+
+
 def test_candidate_hash_stable_and_order_independent():
     from services.trader.training.provenance import candidate_hash
 
