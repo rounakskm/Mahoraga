@@ -52,18 +52,20 @@ def run_loop(
     seed: int = 0,
     gates: GateSystem | None = None,
     regimes: pd.Series | None = None,
+    mutator: Callable | None = None,
     on_iteration: Callable[[Iteration], None] | None = None,
 ) -> CampaignResult:
     """Hill-climb the regime-conditional strategy on a real price series.
 
     `regimes` is the per-bar regime label series; if omitted, the inline
-    trend×vol proxy (`label_regimes`) is used. The runner passes the real Phase-1
-    MESO labels (`training.regime.meso_regimes`). `on_iteration` is called as each
-    iteration completes — live progress during training.
+    trend×vol proxy (`label_regimes`) is used. `mutator(current, iterations, rng)`
+    proposes each candidate; default is the mechanical ±-window nudge, Layer 2
+    passes `training.llm.LLMMutator`. `on_iteration` gives live progress.
     """
     rng = np.random.default_rng(seed)
     regimes = label_regimes(price) if regimes is None else regimes.reindex(price.index)
     gates = gates or GateSystem()
+    mutate = mutator or (lambda cur, _iters, r: cur.mutate(r))
 
     current = RegimeConditionalStrategy.seed()
     result = CampaignResult()
@@ -71,7 +73,7 @@ def run_loop(
     trials_sharpes: list[float] = []
 
     for i in range(iterations):
-        cand = current if i == 0 else current.mutate(rng)
+        cand = current if i == 0 else mutate(current, result.iterations, rng)
 
         # campaign trial context: PBO/DSR over all trials so far (need >= 2 cols)
         matrix = sharpes = None

@@ -53,7 +53,15 @@ def main() -> int:
     ap.add_argument("--iterations", type=int, default=50)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--vault-days", type=int, default=180, help="held-out vault window")
+    ap.add_argument("--llm", action="store_true", help="use the Nemotron LLM mutator (Layer 2)")
+    ap.add_argument("--llm-model", default=None, help="override the LLM model id")
     args = ap.parse_args()
+
+    mutator = None
+    if args.llm:
+        from services.trader.training.llm import LLMMutator
+
+        mutator = LLMMutator(model=args.llm_model)
 
     run_id = f"seed{args.seed}-{int(time.time())}"
     prov = ProvenanceWriter(os.environ.get("MAHORAGA_DSN"))
@@ -70,8 +78,9 @@ def main() -> int:
     train_price, train_regimes, cutoff = split_train(price, regimes, args.vault_days)
     print(f"SPY: {len(price)} bars {price.index[0].date()} -> {price.index[-1].date()}")
     print(f"regimes: {detector}")
+    mut_label = f"LLM ({mutator.model})" if mutator else "mechanical hill-climb"
     print(f"train: <= {cutoff.date()} ({len(train_price)} bars) | vault (held out): > {cutoff.date()}")
-    print(f"running {args.iterations} mechanical iterations on TRAIN through the fortress...\n")
+    print(f"running {args.iterations} iterations on TRAIN through the fortress | mutator: {mut_label}\n")
 
     out_dir = ROOT / "data/autoresearch"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -92,7 +101,7 @@ def main() -> int:
 
     res = run_loop(
         train_price, iterations=args.iterations, seed=args.seed,
-        regimes=train_regimes, on_iteration=on_iter,
+        regimes=train_regimes, mutator=mutator, on_iteration=on_iter,
     )
 
     print(f"\npromoted {res.num_promoted}/{args.iterations} | best TRAIN Sharpe {res.best_sharpe:.4f}")
