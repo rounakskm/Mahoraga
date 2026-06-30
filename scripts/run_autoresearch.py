@@ -26,16 +26,16 @@ import pandas as pd
 
 from services.trader.training.loop import run_loop
 from services.trader.training.provenance import ProvenanceWriter, candidate_hash
-from services.trader.training.vault import split_train, validate_on_vault
+from services.trader.training.vault import validate_on_vault, vault_cutoff
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests/integration/phase-2/calibration/fixtures/spy_daily.csv"
 
 
-def load_spy() -> tuple[pd.Series, pd.Series | None]:
-    """Return (adj_close price, regimes). From the real OHLCV parquet we use the
-    actual Phase-1 MESO detector; from the adj-close-only fixture, regimes is None
-    (the loop falls back to its inline proxy)."""
+def load_spy() -> tuple[pd.Series, pd.Series | None, pd.DataFrame | None]:
+    """Return (adj_close price, regimes, ohlcv). From the real OHLCV parquet we use
+    the actual Phase-1 MESO detector + return the frame (for --learn-detector); from
+    the adj-close-only fixture, regimes/ohlcv are None (loop uses the inline proxy)."""
     files = sorted(glob.glob(str(ROOT / "data/parquet/ohlcv/SPY/*.parquet")))
     if files:
         from services.trader.training.regime import meso_regimes
@@ -43,9 +43,9 @@ def load_spy() -> tuple[pd.Series, pd.Series | None]:
         df = pd.concat(pd.read_parquet(f) for f in files).sort_values("bar_timestamp")
         df.index = pd.to_datetime(df["bar_timestamp"])
         price = df["adj_close"].astype(float)
-        return price, meso_regimes(df)
+        return price, meso_regimes(df), df
     df = pd.read_csv(FIXTURE, parse_dates=["date"]).set_index("date")
-    return df["adj_close"].astype(float), None
+    return df["adj_close"].astype(float), None, None
 
 
 def main() -> int:
@@ -55,6 +55,8 @@ def main() -> int:
     ap.add_argument("--vault-days", type=int, default=180, help="held-out vault window")
     ap.add_argument("--llm", action="store_true", help="use the Nemotron LLM mutator (Layer 2)")
     ap.add_argument("--llm-model", default=None, help="override the LLM model id")
+    ap.add_argument("--learn-detector", action="store_true",
+                    help="make the regime detector thresholds a mutation target (Layer 2)")
     args = ap.parse_args()
 
     mutator = None
@@ -66,7 +68,7 @@ def main() -> int:
     run_id = f"seed{args.seed}-{int(time.time())}"
     prov = ProvenanceWriter(os.environ.get("MAHORAGA_DSN"))
 
-    price, regimes = load_spy()
+    price, regimes, ohlcv = load_spy()
     real_detector = regimes is not None
     if regimes is None:  # fixture fallback: derive the proxy so we can still split
         from services.trader.training.strategy_template import label_regimes
@@ -74,8 +76,20 @@ def main() -> int:
         regimes = label_regimes(price)
     detector = "real Phase-1 MESO detector" if real_detector else "inline trend×vol proxy"
 
-    # The search may ONLY see training data; the last --vault-days are held out.
-    train_price, train_regimes, cutoff = split_train(price, regimes, args.vault_days)
+    learn_detector = args.learn_detector and ohlcv is not None
+    cutoff = vault_cutoff(price, args.vault_days)
+    train_price = price[price.index <= cutoff]
+    if learn_detector:  # the detector is a mutation target: search on TRAIN features
+        from services.trader.training.regime import detector_features
+
+        adx, vol = detector_features(ohlcv)
+        train_feats = (adx[adx.index <= cutoff], vol[vol.index <= cutoff])
+        detector = "LEARNABLE (thresholds mutated)"
+        loop_kwargs = {"detector_features": train_feats}
+    else:  # fixed detector: search on the train regime slice
+        train_regimes = regimes[regimes.index <= cutoff]
+        loop_kwargs = {"regimes": train_regimes}
+
     print(f"SPY: {len(price)} bars {price.index[0].date()} -> {price.index[-1].date()}")
     print(f"regimes: {detector}")
     mut_label = f"LLM ({mutator.model})" if mutator else "mechanical hill-climb"
@@ -104,7 +118,7 @@ def main() -> int:
 
     res = run_loop(
         train_price, iterations=args.iterations, seed=args.seed,
-        regimes=train_regimes, mutator=mutator, on_iteration=on_iter,
+        mutator=mutator, on_iteration=on_iter, **loop_kwargs,
     )
 
     print(f"\npromoted {res.num_promoted}/{args.iterations} | best TRAIN Sharpe {res.best_sharpe:.4f}"
@@ -113,24 +127,32 @@ def main() -> int:
 
     # The non-negotiable gate: validate the promoted best on the untouched vault.
     if res.best is not None:
-        vr = validate_on_vault(res.best, price, regimes, cutoff, res.best_sharpe)
+        # learnable detector: re-derive vault regimes from the best's learned thresholds
+        full_regimes = res.best.regimes_for(adx, vol) if learn_detector else regimes
+        vr = validate_on_vault(res.best, price, full_regimes, cutoff, res.best_sharpe)
         verdict = "✅ HOLDS — deployment-eligible" if vr.holds else "❌ FAILS vault — NOT deployment-eligible"
         print(f"\nvault-holdout: {verdict}\n  {vr.reason}")
-        if vr.holds:  # register the deployment-eligible survivor
+        if vr.holds:  # register the deployment-eligible survivor (incl learned detector)
             strat_dir = ROOT / "strategies"
             strat_dir.mkdir(exist_ok=True)
+            best_params = {
+                "windows": res.best.windows,
+                "adx_threshold": res.best.adx_threshold,
+                "vol_threshold": res.best.vol_threshold,
+            }
             artifact = strat_dir / f"{run_id}.json"
             artifact.write_text(json.dumps({
-                "run_id": run_id, "candidate_hash": candidate_hash(res.best.windows),
-                "params": res.best.windows, "train_sharpe": res.best_sharpe,
+                "run_id": run_id, "candidate_hash": candidate_hash(best_params),
+                **best_params, "train_sharpe": res.best_sharpe,
                 "vault_sharpe": vr.vault_sharpe, "vault_holds": vr.holds,
             }, indent=2))
             prov.register_strategy(
-                run_id=run_id, params=res.best.windows, train_sharpe=res.best_sharpe,
+                run_id=run_id, params=best_params, train_sharpe=res.best_sharpe,
                 vault_sharpe=vr.vault_sharpe, vault_holds=vr.holds,
                 artifact_path=str(artifact.relative_to(ROOT)),
             )
-            print(f"  registered -> {artifact.relative_to(ROOT)}")
+            print(f"  registered -> {artifact.relative_to(ROOT)} "
+                  f"(detector: adx≥{res.best.adx_threshold:.0f}, vol>{res.best.vol_threshold:.1f})")
     else:
         print("\nvault-holdout: no promoted candidate to validate")
 

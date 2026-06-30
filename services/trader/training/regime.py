@@ -43,3 +43,12 @@ def meso_regimes(ohlcv: pd.DataFrame, ticker: str = "SPY") -> pd.Series:
     return feats.apply(
         lambda row: _LENS.classify(feature_row=row, macro_row=None).label, axis=1
     )
+
+
+def detector_features(ohlcv: pd.DataFrame, ticker: str = "SPY") -> tuple[pd.Series, pd.Series]:
+    """The MESO inputs (adx_14, realized_vol_pct_60) as bar-indexed series — for the
+    learnable detector, where the candidate applies its OWN thresholds to these."""
+    ctx = FeatureContext(ticker=ticker, frame=ohlcv, asof=ohlcv.index[-1])
+    adx = pd.Series(_FEATS["adx_14"].compute(ctx).to_numpy(), index=ohlcv.index)
+    vol = pd.Series(_FEATS["realized_vol_pct_60"].compute(ctx).to_numpy(), index=ohlcv.index)
+    return adx, vol
