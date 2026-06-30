@@ -119,3 +119,27 @@ def test_loop_accepts_external_regimes():
     price = ohlcv["close"]
     res = run_loop(price, iterations=3, seed=3, regimes=meso_regimes(ohlcv))
     assert len(res.iterations) == 3
+
+
+def test_vault_split_holds_out_the_recent_window():
+    from services.trader.training.vault import split_train
+
+    price = _price(n=1500)
+    regimes = label_regimes(price)
+    tp, _tr, cutoff = split_train(price, regimes, vault_days=180)
+    assert cutoff == price.index[-1] - pd.Timedelta(days=180)
+    assert (tp.index <= cutoff).all()      # search sees nothing past the cutoff
+    assert len(tp) < len(price)            # something is held out
+
+
+def test_vault_validation_report_and_ratio_rule():
+    from services.trader.training.vault import split_train, validate_on_vault
+
+    price = _price(n=1500, seed=5)
+    regimes = label_regimes(price)
+    _, _, cutoff = split_train(price, regimes, 180)
+    strat = RegimeConditionalStrategy.seed()
+    vr = validate_on_vault(strat, price, regimes, cutoff, train_sharpe=0.05)
+    assert isinstance(vr.holds, bool) and isinstance(vr.vault_sharpe, float)
+    # a non-positive train edge can never "hold"
+    assert validate_on_vault(strat, price, regimes, cutoff, train_sharpe=-0.1).holds is False
