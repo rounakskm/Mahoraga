@@ -13,7 +13,7 @@ the per-phase specs + `docs/measurements/*-exit-verification.md`.
 | — | **Substrate migration** — OpenClaw → **Hermes**, NVIDIA Nemotron inference, **Hindsight memory** (Hermes proven using it) | ✅ complete |
 | 1 | Data + features + regime detector + backtest harness | ✅ complete (`phase-1-complete`) |
 | 2 | **Anti-overfitting fortress** — 4 walls + 3 gates, RiskLabAI, real-SPY calibration | ✅ complete (`phase-2-complete`) |
-| 3 | **Autoresearch loop** — the self-improving core | 🟡 **in progress (Layer 1 ✅; Layer 2 LLM mutator ✅, detector-as-target next)** |
+| 3 | **Autoresearch loop** — the self-improving core | 🟡 **in progress (Layer 1 ✅; Layer 2 ✅ — LLM + learnable detector; Layer 3 next)** |
 | 4 | News / sentiment intelligence | ⚪ not started |
 | 5 | Broker integration (paper) | ⚪ not started |
 | 6 | Live capital + ops (dashboard, Telegram) | ⚪ not started |
@@ -40,11 +40,15 @@ and the promoted best holds on the untouched vault. Run it:
 `uv run python scripts/run_autoresearch.py --iterations 50`
 ([runbook](runbooks/autoresearch-training.md)).
 
-### Layer 2 — LLM mutator
-🟡 **in progress.** ✅ Nemotron proposes regime-conditional mutations (`--llm`;
-`LLMMutator` calls NVIDIA Build / LiteLLM, validates the JSON, safety-falls-back to
-the mechanical mutation on any failure). ⏳ next: the **regime detector itself** as a
-mutation target.
+### Layer 2 — LLM mutator + learnable detector ✅
+- ✅ **LLM mutator** — Nemotron proposes regime-conditional mutations (`--llm`;
+  `LLMMutator` calls NVIDIA Build / LiteLLM, validates the JSON, safety-falls-back
+  to the mechanical mutation on any failure).
+- ✅ **Detector-as-mutation-target** — the candidate carries the MESO thresholds
+  (ADX, vol-pct); `--learn-detector` makes them a mutation target so the loop learns
+  *both* how to detect regimes and how to trade them. Self-corrects the Phase-1
+  vol-pct mis-scaling without touching Phase-1. The LLM tunes thresholds too when
+  `--llm --learn-detector` are combined (thresholds clamped, not rejected).
 
 ### Layer 3 — agent fleet
 ⚪ not started. The 7-role Hermes subagent fleet (Orchestrator / Planner / Researcher
@@ -53,5 +57,8 @@ grounding + compressed-replay + Telegram ops. Wraps a loop that already works.
 
 ## Current focus
 
-**Layer 1 complete; Layer 2 LLM mutator live** (`--llm`); loop now optimises **quarterly win-rate + resilience** (not just Sharpe), reflecting the thesis. Next: regime-detector-as-mutation-target, then Layer 3. Capital is only at
-risk from Phase 5 onward; Phases 1–4 are pure research with zero capital.
+**Layers 1 & 2 complete.** LLM mutator live (`--llm`), regime detector is a learnable
+mutation target (`--learn-detector`), and the loop optimises **quarterly win-rate +
+resilience** (not just Sharpe), reflecting the thesis. **Next: Layer 3** — the 7-role
+Hermes agent fleet wrapping the working loop. Capital is only at risk from Phase 5
+onward; Phases 1–4 are pure research with zero capital.
