@@ -34,10 +34,26 @@ def test_parse_extracts_json_from_prose():
 
 
 def test_validate_accepts_and_rejects():
-    assert LLMMutator._validate({k: 100 for k in REGIMES}).windows["trending_low_vol"] == 100
-    assert LLMMutator._validate({"x": 100}) is None                  # wrong keys
-    assert LLMMutator._validate({k: 9999 for k in REGIMES}) is None  # out of range
-    assert LLMMutator._validate({k: "abc" for k in REGIMES}) is None  # non-numeric
+    v = LLMMutator(api_key="x")._validate
+    assert v({k: 100 for k in REGIMES}).windows["trending_low_vol"] == 100
+    assert v({"x": 100}) is None                  # wrong keys
+    assert v({k: 9999 for k in REGIMES}) is None  # out of range
+    assert v({k: "abc" for k in REGIMES}) is None  # non-numeric
+
+
+def test_detector_mode_validates_and_clamps_thresholds():
+    v = LLMMutator(api_key="x", learn_detector=True)._validate
+    base = {k: 100 for k in REGIMES}
+    # in-range thresholds pass through
+    s = v({**base, "adx_threshold": 22.0, "vol_threshold": 40.0})
+    assert (s.adx_threshold, s.vol_threshold) == (22.0, 40.0)
+    # out-of-range thresholds are CLAMPED (kept usable), not rejected
+    s2 = v({**base, "adx_threshold": 999.0, "vol_threshold": -5.0})
+    assert s2.adx_threshold == 40.0 and s2.vol_threshold == 5.0  # ADX_T_MAX / VOL_T_MIN
+    # detector mode requires the extra keys
+    assert v(base) is None
+    # plain mode rejects the extra keys
+    assert LLMMutator(api_key="x")._validate({**base, "adx_threshold": 22.0}) is None
 
 
 def test_good_reply_becomes_the_candidate():

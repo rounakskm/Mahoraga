@@ -63,7 +63,7 @@ def main() -> int:
     if args.llm:
         from services.trader.training.llm import LLMMutator
 
-        mutator = LLMMutator(model=args.llm_model)
+        mutator = LLMMutator(model=args.llm_model, learn_detector=args.learn_detector)
 
     run_id = f"seed{args.seed}-{int(time.time())}"
     prov = ProvenanceWriter(os.environ.get("MAHORAGA_DSN"))
