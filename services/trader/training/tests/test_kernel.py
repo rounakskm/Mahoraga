@@ -88,3 +88,34 @@ def test_pbo_gated_on_trial_diversity():
         trial_sharpes=[0.06] * 16, num_trials=16,
     ).report
     assert rep2.wall_reports["statistical_rigor"].sub_results["pbo"] is not None
+
+
+def _ohlcv(n=900, seed=0):
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2018-01-01", periods=n)
+    close = 100 * np.exp(np.cumsum(rng.normal(0.0004, 0.012, n)))
+    span = close * rng.uniform(0.003, 0.02, n)
+    return pd.DataFrame(
+        {"open": close, "high": close + span, "low": close - span,
+         "close": close, "volume": rng.integers(1e6, 5e6, n)},
+        index=idx,
+    )
+
+
+def test_meso_regimes_real_detector_aligns_and_labels():
+    from services.trader.training.regime import meso_regimes
+
+    ohlcv = _ohlcv()
+    labels = meso_regimes(ohlcv)
+    assert labels.index.equals(ohlcv.index)  # the index-alignment bug stays fixed
+    assert set(labels.unique()) <= set(REGIMES) | {"undefined"}
+    assert (labels != "undefined").sum() > 100  # most bars get a real regime
+
+
+def test_loop_accepts_external_regimes():
+    from services.trader.training.regime import meso_regimes
+
+    ohlcv = _ohlcv(seed=3)
+    price = ohlcv["close"]
+    res = run_loop(price, iterations=3, seed=3, regimes=meso_regimes(ohlcv))
+    assert len(res.iterations) == 3

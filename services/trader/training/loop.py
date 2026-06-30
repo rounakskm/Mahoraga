@@ -51,15 +51,18 @@ def run_loop(
     iterations: int = 30,
     seed: int = 0,
     gates: GateSystem | None = None,
+    regimes: pd.Series | None = None,
     on_iteration: Callable[[Iteration], None] | None = None,
 ) -> CampaignResult:
     """Hill-climb the regime-conditional strategy on a real price series.
 
-    `on_iteration` is called as each iteration completes — used for live progress
-    during training (the loop is otherwise silent until it returns).
+    `regimes` is the per-bar regime label series; if omitted, the inline
+    trend×vol proxy (`label_regimes`) is used. The runner passes the real Phase-1
+    MESO labels (`training.regime.meso_regimes`). `on_iteration` is called as each
+    iteration completes — live progress during training.
     """
     rng = np.random.default_rng(seed)
-    regimes = label_regimes(price)
+    regimes = label_regimes(price) if regimes is None else regimes.reindex(price.index)
     gates = gates or GateSystem()
 
     current = RegimeConditionalStrategy.seed()
