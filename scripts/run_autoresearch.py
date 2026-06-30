@@ -85,15 +85,18 @@ def main() -> int:
     out_dir = ROOT / "data/autoresearch"
     out_dir.mkdir(parents=True, exist_ok=True)
     live = out_dir / f"run_seed{args.seed}_{len(price)}bars.csv"
-    live.write_text("index,sharpe,promoted,is_best,windows,reason\n")
+    live.write_text("index,sharpe,fitness,quarterly_win_rate,max_drawdown,promoted,is_best,windows,reason\n")
 
     # Live progress: print each iteration AND append it to the CSV as it completes,
     # so training is watchable in real time (`tail -f` the CSV from another terminal).
     def on_iter(it):
         flag = "BEST" if it.is_best else ("ok " if it.promoted else "   ")
-        print(f"  iter {it.index:3d}  Sharpe {it.sharpe:+.4f}  [{flag}]  {it.reason[:70]}", flush=True)
+        print(
+            f"  iter {it.index:3d}  Sharpe {it.sharpe:+.4f}  Qwin {it.quarterly_win_rate:.0%}  "
+            f"dd {it.max_drawdown:+.0%}  [{flag}]  {it.reason[:48]}", flush=True)
         with live.open("a") as fh:
-            fh.write(f'{it.index},{it.sharpe:.6f},{it.promoted},{it.is_best},"{it.windows}","{it.reason}"\n')
+            fh.write(f'{it.index},{it.sharpe:.6f},{it.fitness:.6f},{it.quarterly_win_rate:.4f},'
+                     f'{it.max_drawdown:.4f},{it.promoted},{it.is_best},"{it.windows}","{it.reason}"\n')
         prov.write_iteration(
             run_id=run_id, iteration=it.index, params=it.windows,
             train_sharpe=it.sharpe, promoted=it.promoted, is_best=it.is_best, reason=it.reason,
@@ -104,7 +107,8 @@ def main() -> int:
         regimes=train_regimes, mutator=mutator, on_iteration=on_iter,
     )
 
-    print(f"\npromoted {res.num_promoted}/{args.iterations} | best TRAIN Sharpe {res.best_sharpe:.4f}")
+    print(f"\npromoted {res.num_promoted}/{args.iterations} | best TRAIN Sharpe {res.best_sharpe:.4f}"
+          f" | quarterly-win {res.best_quarterly_win_rate:.0%} | fitness {res.best_fitness:.4f}")
     print(f"best regime->window: {res.best.windows if res.best else None}")
 
     # The non-negotiable gate: validate the promoted best on the untouched vault.

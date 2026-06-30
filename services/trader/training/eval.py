@@ -15,9 +15,44 @@ import numpy as np
 import pandas as pd
 
 from services.trader.gates import GateSystem, GateSystemReport
+from services.trader.gates.gates import max_drawdown
 from services.trader.training.strategy_template import RegimeConditionalStrategy
 from services.trader.walls import EvaluationContext
 from services.trader.walls import risklabai_wrap as rl
+
+
+@dataclass(frozen=True)
+class Fitness:
+    """What the loop maximises — Mahoraga's actual objective, not raw Sharpe.
+
+    Encodes the thesis: end every quarter profitable (quarterly_win_rate) and stay
+    resilient when hit (bounded drawdown), on top of risk-adjusted return.
+    """
+
+    score: float
+    sharpe: float
+    quarterly_win_rate: float
+    max_drawdown: float
+    resilience: float
+
+
+def compute_fitness(returns: pd.Series) -> Fitness:
+    sharpe = rl.sharpe(returns)
+    r = returns.dropna()
+    if len(r) >= 60 and isinstance(r.index, pd.DatetimeIndex):
+        q = (1.0 + r).resample("QE").prod() - 1.0  # per-calendar-quarter return
+        q_win = float((q > 0).mean()) if len(q) else 0.0
+    else:  # short / non-dated series: 4 equal chunks
+        chunks = np.array_split(r.to_numpy(), 4)
+        q_win = float(np.mean([c.sum() > 0 for c in chunks if len(c)]))
+    dd = max_drawdown(r)  # negative
+    # resilience: full credit to -10% drawdown, linearly to 0 at -40%.
+    resilience = float(np.clip(1.0 - max(0.0, abs(dd) - 0.10) / 0.30, 0.0, 1.0))
+    # reward risk-adjusted return, weighted by quarterly consistency (up to 2x) and
+    # scaled by resilience. A strategy with losing quarters or deep drawdowns is
+    # ranked below an equally-sharp one that ends quarters green and stays shallow.
+    score = sharpe * (0.5 + 0.5 * q_win) * resilience
+    return Fitness(score, sharpe, q_win, dd, resilience)
 
 
 @dataclass(frozen=True)
@@ -25,6 +60,7 @@ class EvalResult:
     report: GateSystemReport
     returns: pd.Series
     sharpe: float
+    fitness: Fitness
 
 
 def _walk_forward(returns: pd.Series, folds: int = 5) -> list[float]:
@@ -102,4 +138,7 @@ def evaluate(
         universe=["SPY"], metadata=metadata,
     )
     report = (gates or GateSystem()).evaluate(ctx)
-    return EvalResult(report=report, returns=returns, sharpe=rl.sharpe(returns))
+    return EvalResult(
+        report=report, returns=returns, sharpe=rl.sharpe(returns),
+        fitness=compute_fitness(returns),
+    )

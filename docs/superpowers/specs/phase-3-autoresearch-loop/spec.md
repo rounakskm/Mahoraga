@@ -18,6 +18,8 @@
 1. **How to read the current market regime** — not just consuming the Phase-1 rule-based detector, but *improving* regime detection itself (its features, thresholds, labels) as a first-class mutation target. Better regime reads are as valuable as better strategies.
 2. **Which strategy works in *that* regime, and how to apply it** — strategies are learned and judged **regime-conditionally**: a candidate is a *(regime → strategy + sizing)* mapping, not a single global rule. The system's edge is matching the right behaviour to the detected condition (e.g. trend-following in trending regimes, mean-reversion in ranging, risk-off in high-vol).
 
+**Objective (the loop's fitness):** Mahoraga is judged on *resilience + quarterly profitability*, not raw Sharpe. The loop ranks candidates by a fitness that rewards a high **quarterly win-rate** ("end every quarter profitable") and **bounded drawdown** ("hit once, not going down") on top of risk-adjusted return — so training optimises what a good trader actually is, not just a high Sharpe. The fortress gates (pass/fail) are unchanged; fitness chooses the best among the survivors.
+
 This is why "compounds intelligence, not just capital" is literal: the system gets better at *both* perceiving the market and acting on it, and remembers which pairings worked. Both objectives flow through the existing machinery — Wall 3's `per_regime_sharpes` already judges edge **per regime**, and promotion is **regime-aware** (a candidate can be the leader *for a regime*, not only globally). Layer 1–2 learn regime-conditional strategy selection on the fixed detector; evolving the **detector itself** is an explicit mutation target introduced in Layer 2–3.
 
 The full vision is unchanged:

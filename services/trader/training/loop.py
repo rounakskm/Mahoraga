@@ -32,6 +32,9 @@ class Iteration:
     promoted: bool
     is_best: bool
     reason: str
+    fitness: float = 0.0
+    quarterly_win_rate: float = 0.0
+    max_drawdown: float = 0.0
 
 
 @dataclass
@@ -39,6 +42,8 @@ class CampaignResult:
     iterations: list[Iteration] = field(default_factory=list)
     best: RegimeConditionalStrategy | None = None
     best_sharpe: float = float("-inf")
+    best_fitness: float = float("-inf")
+    best_quarterly_win_rate: float = 0.0
 
     @property
     def num_promoted(self) -> int:
@@ -92,11 +97,19 @@ def run_loop(
         trials_sharpes.append(ev.sharpe)
 
         promoted = ev.report.promoted
-        is_best = promoted and ev.sharpe > result.best_sharpe
+        # rank by FITNESS (quarterly consistency + resilience + Sharpe), not raw Sharpe
+        is_best = promoted and ev.fitness.score > result.best_fitness
         if is_best:
-            result.best, result.best_sharpe = cand, ev.sharpe
+            result.best = cand
+            result.best_fitness = ev.fitness.score
+            result.best_sharpe = ev.sharpe
+            result.best_quarterly_win_rate = ev.fitness.quarterly_win_rate
             current = cand  # hill-climb: accept the improvement
-        it = Iteration(i, dict(cand.windows), ev.sharpe, promoted, is_best, ev.report.reason)
+        it = Iteration(
+            i, dict(cand.windows), ev.sharpe, promoted, is_best, ev.report.reason,
+            fitness=ev.fitness.score, quarterly_win_rate=ev.fitness.quarterly_win_rate,
+            max_drawdown=ev.fitness.max_drawdown,
+        )
         result.iterations.append(it)
         if on_iteration is not None:
             on_iteration(it)

@@ -53,5 +53,5 @@ grounding + compressed-replay + Telegram ops. Wraps a loop that already works.
 
 ## Current focus
 
-**Layer 1 complete; Layer 2 LLM mutator live** (`--llm`). Next: regime-detector-as-mutation-target, then Layer 3. Capital is only at
+**Layer 1 complete; Layer 2 LLM mutator live** (`--llm`); loop now optimises **quarterly win-rate + resilience** (not just Sharpe), reflecting the thesis. Next: regime-detector-as-mutation-target, then Layer 3. Capital is only at
 risk from Phase 5 onward; Phases 1–4 are pure research with zero capital.
