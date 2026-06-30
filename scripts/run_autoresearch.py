@@ -4,24 +4,28 @@
     uv run python scripts/run_autoresearch.py --iterations 50
 
 Loads SPY daily from the Phase-1 parquet store (falls back to the committed
-calibration fixture), runs the regime-conditional hill-climb through the Phase-2
-fortress, prints a summary, and writes every iteration to
-data/autoresearch/<timestamp>.parquet (kept + discarded, with the gate reason).
+calibration fixture), searches on TRAIN through the Phase-2 fortress, validates the
+promoted best on the held-out vault, and records provenance.
 
-ponytail: results -> parquet for now. Postgres experiments.iterations + git
-strategy registry (full provenance) is the next Layer-1 slice; the loop already
-returns everything they need.
+Provenance: every iteration streams to a live CSV (always) and, when MAHORAGA_DSN
+is set, to Postgres `experiments.iterations`; a deployment-eligible best (promoted
+AND vault holds) is written to the tracked `strategies/<run>.json` registry and
+`strategies.registry`. No DSN -> Postgres writes are skipped, the run still works.
 """
 
 from __future__ import annotations
 
 import argparse
 import glob
+import json
+import os
+import time
 from pathlib import Path
 
 import pandas as pd
 
 from services.trader.training.loop import run_loop
+from services.trader.training.provenance import ProvenanceWriter, candidate_hash
 from services.trader.training.vault import split_train, validate_on_vault
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,6 +55,9 @@ def main() -> int:
     ap.add_argument("--vault-days", type=int, default=180, help="held-out vault window")
     args = ap.parse_args()
 
+    run_id = f"seed{args.seed}-{int(time.time())}"
+    prov = ProvenanceWriter(os.environ.get("MAHORAGA_DSN"))
+
     price, regimes = load_spy()
     real_detector = regimes is not None
     if regimes is None:  # fixture fallback: derive the proxy so we can still split
@@ -78,6 +85,10 @@ def main() -> int:
         print(f"  iter {it.index:3d}  Sharpe {it.sharpe:+.4f}  [{flag}]  {it.reason[:70]}", flush=True)
         with live.open("a") as fh:
             fh.write(f'{it.index},{it.sharpe:.6f},{it.promoted},{it.is_best},"{it.windows}","{it.reason}"\n')
+        prov.write_iteration(
+            run_id=run_id, iteration=it.index, params=it.windows,
+            train_sharpe=it.sharpe, promoted=it.promoted, is_best=it.is_best, reason=it.reason,
+        )
 
     res = run_loop(
         train_price, iterations=args.iterations, seed=args.seed,
@@ -92,9 +103,31 @@ def main() -> int:
         vr = validate_on_vault(res.best, price, regimes, cutoff, res.best_sharpe)
         verdict = "✅ HOLDS — deployment-eligible" if vr.holds else "❌ FAILS vault — NOT deployment-eligible"
         print(f"\nvault-holdout: {verdict}\n  {vr.reason}")
+        if vr.holds:  # register the deployment-eligible survivor
+            strat_dir = ROOT / "strategies"
+            strat_dir.mkdir(exist_ok=True)
+            artifact = strat_dir / f"{run_id}.json"
+            artifact.write_text(json.dumps({
+                "run_id": run_id, "candidate_hash": candidate_hash(res.best.windows),
+                "params": res.best.windows, "train_sharpe": res.best_sharpe,
+                "vault_sharpe": vr.vault_sharpe, "vault_holds": vr.holds,
+            }, indent=2))
+            prov.register_strategy(
+                run_id=run_id, params=res.best.windows, train_sharpe=res.best_sharpe,
+                vault_sharpe=vr.vault_sharpe, vault_holds=vr.holds,
+                artifact_path=str(artifact.relative_to(ROOT)),
+            )
+            print(f"  registered -> {artifact.relative_to(ROOT)}")
     else:
         print("\nvault-holdout: no promoted candidate to validate")
-    print(f"\nlive results -> {live.relative_to(ROOT)}")
+
+    prov.close()
+    pg = (
+        "Postgres experiments.iterations + strategies.registry"
+        if prov.is_enabled() else "skipped (set MAHORAGA_DSN to enable)"
+    )
+    print(f"\nprovenance: {pg}")
+    print(f"live results -> {live.relative_to(ROOT)}")
     return 0
 
 

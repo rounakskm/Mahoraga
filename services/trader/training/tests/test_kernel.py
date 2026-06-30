@@ -143,3 +143,24 @@ def test_vault_validation_report_and_ratio_rule():
     assert isinstance(vr.holds, bool) and isinstance(vr.vault_sharpe, float)
     # a non-positive train edge can never "hold"
     assert validate_on_vault(strat, price, regimes, cutoff, train_sharpe=-0.1).holds is False
+
+
+def test_candidate_hash_stable_and_order_independent():
+    from services.trader.training.provenance import candidate_hash
+
+    a = {"trending_low_vol": 200, "ranging_high_vol": 30}
+    assert candidate_hash(a) == candidate_hash({"ranging_high_vol": 30, "trending_low_vol": 200})
+    assert candidate_hash(a) != candidate_hash({**a, "trending_low_vol": 199})
+
+
+def test_provenance_writer_is_noop_without_dsn():
+    from services.trader.training.provenance import ProvenanceWriter
+
+    w = ProvenanceWriter(None)
+    assert not w.is_enabled()
+    # no DSN -> writes are skipped, no connection attempted, no error
+    w.write_iteration(run_id="r", iteration=0, params={"a": 1}, train_sharpe=0.1,
+                      promoted=True, is_best=True, reason="ok")
+    w.register_strategy(run_id="r", params={"a": 1}, train_sharpe=0.1,
+                        vault_sharpe=0.1, vault_holds=True)
+    w.close()
