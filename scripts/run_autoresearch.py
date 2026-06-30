@@ -48,6 +48,76 @@ def load_spy() -> tuple[pd.Series, pd.Series | None, pd.DataFrame | None]:
     return df["adj_close"].astype(float), None, None
 
 
+def run_fleet(args: argparse.Namespace) -> int:
+    """Layer-3 seven-role Orchestrator cadence on real SPY (or the fixture).
+
+    `--cadence nightly|weekend` runs a single cadence; `--cadence replay` wraps it in
+    a PIT-clamped compressed-history campaign (one cadence per expanding window, never
+    crossing the vault). Every external dependency is graceful-offline: no DSN -> no
+    Postgres promote; no `--hindsight` -> no memory; the loop still runs end-to-end.
+    """
+    from services.trader.training.hindsight_client import HindsightClient
+    from services.trader.training.notebook import Notebook
+    from services.trader.training.orchestrator import Orchestrator
+    from services.trader.training.replay import replay_campaign
+
+    price, regimes, _ohlcv = load_spy()
+    if regimes is None:  # fixture fallback: derive the proxy so we can still split
+        from services.trader.training.strategy_template import label_regimes
+
+        regimes = label_regimes(price)
+
+    cut = vault_cutoff(price, args.vault_days)
+    train_price = price[price.index <= cut]
+    train_regimes = regimes[regimes.index <= cut]
+    run_id = f"fleet-{args.cadence}-seed{args.seed}-{int(time.time())}"
+
+    hindsight = (
+        HindsightClient(os.environ.get("MAHORAGA_HINDSIGHT_URL")) if args.hindsight else None
+    )
+    notebook = Notebook(ROOT / "services/trader/research")
+    dsn = os.environ.get("MAHORAGA_DSN")
+
+    print(f"SPY: {len(price)} bars {price.index[0].date()} -> {price.index[-1].date()}")
+    print(f"fleet cadence: {args.cadence} | train: <= {cut.date()} ({len(train_price)} bars) "
+          f"| vault (held out): > {cut.date()}")
+    mem = "enabled" if (hindsight and hindsight.is_enabled()) else "disabled"
+    pg = "Postgres" if dsn else "skipped (set MAHORAGA_DSN)"
+    print(f"hindsight: {mem} | provenance: {pg}\n")
+
+    if args.cadence == "replay":
+        def run_fn(step):
+            orch = Orchestrator(
+                step.train_price, step.train_regimes,
+                dsn=dsn, run_id=run_id, hindsight=hindsight, notebook=notebook,
+            )
+            summary = orch.run_cadence("replay", iterations=args.iterations, seed=args.seed)
+            print(f"  replay asof {step.asof.date()} ({len(step.train_price)} bars): "
+                  f"proposed={summary.proposed} reviewed_out={summary.reviewed_out} "
+                  f"vetoed={summary.vetoed} recorded={summary.recorded} "
+                  f"promoted={summary.promoted} halted={summary.halted}", flush=True)
+            return summary
+
+        summaries = replay_campaign(
+            price, regimes, run_fn,
+            start=price.index[252], vault_cutoff=cut, step_days=63,
+        )
+        promoted = sum(s.promoted for s in summaries)
+        print(f"\nreplay campaign: {len(summaries)} steps | "
+              f"recorded {sum(s.recorded for s in summaries)} | promoted {promoted}")
+        return 0
+
+    orch = Orchestrator(
+        train_price, train_regimes,
+        dsn=dsn, run_id=run_id, hindsight=hindsight, notebook=notebook,
+    )
+    summary = orch.run_cadence(args.cadence, iterations=args.iterations, seed=args.seed)
+    print(f"cadence {summary.cadence}: proposed={summary.proposed} "
+          f"reviewed_out={summary.reviewed_out} vetoed={summary.vetoed} "
+          f"recorded={summary.recorded} promoted={summary.promoted} halted={summary.halted}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Layer-1 autoresearch training run (SPY)")
     ap.add_argument("--iterations", type=int, default=50)
@@ -57,7 +127,17 @@ def main() -> int:
     ap.add_argument("--llm-model", default=None, help="override the LLM model id")
     ap.add_argument("--learn-detector", action="store_true",
                     help="make the regime detector thresholds a mutation target (Layer 2)")
+    ap.add_argument("--fleet", action="store_true",
+                    help="run the seven-role Orchestrator cadence (Layer 3) "
+                         "instead of the mechanical/LLM loop")
+    ap.add_argument("--cadence", choices=("nightly", "weekend", "replay"), default="nightly",
+                    help="Layer-3 cadence: one run (nightly/weekend) or compressed-history replay")
+    ap.add_argument("--hindsight", action="store_true",
+                    help="enable the Hindsight memory client (MAHORAGA_HINDSIGHT_URL)")
     args = ap.parse_args()
+
+    if args.fleet:
+        return run_fleet(args)
 
     mutator = None
     if args.llm:
