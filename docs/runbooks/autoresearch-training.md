@@ -11,7 +11,10 @@ trending/ranging × low/high vol — it holds SPY when price is above that regim
 SMA), backtests each candidate on ~10 years of real SPY, runs it through the
 **Phase-2 anti-overfitting fortress** (4 walls + 3 gates), and keeps the best
 *promoted* candidate. It hill-climbs toward a better regime→behaviour map, and the
-fortress filters out fragile / overfit / high-drawdown candidates.
+fortress filters out fragile / overfit / high-drawdown candidates. The search runs
+**only on training data**; the promoted best is then validated on the held-out
+**vault** (the last `--vault-days`, default 180, that the search never saw) — it is
+deployment-eligible only if its edge survives there.
 
 ---
 
