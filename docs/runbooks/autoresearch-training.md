@@ -41,7 +41,8 @@ uv run python scripts/pull_spy_daily.py        # -> data/parquet/ohlcv/SPY/
 ## Step 2 — Start training
 
 ```bash
-uv run python scripts/run_autoresearch.py --iterations 50 --seed 0
+uv run python scripts/run_autoresearch.py --iterations 50
+# add --llm to use the Nemotron mutator (Layer 2; needs NVIDIA_API_KEY) --seed 0
 ```
 
 Flags: `--iterations N` (default 50; ~1 s/iteration), `--seed S` (reproducible run).

@@ -13,7 +13,7 @@ the per-phase specs + `docs/measurements/*-exit-verification.md`.
 | — | **Substrate migration** — OpenClaw → **Hermes**, NVIDIA Nemotron inference, **Hindsight memory** (Hermes proven using it) | ✅ complete |
 | 1 | Data + features + regime detector + backtest harness | ✅ complete (`phase-1-complete`) |
 | 2 | **Anti-overfitting fortress** — 4 walls + 3 gates, RiskLabAI, real-SPY calibration | ✅ complete (`phase-2-complete`) |
-| 3 | **Autoresearch loop** — the self-improving core | 🟡 **in progress (Layer 1 ✅ complete; Layer 2 next)** |
+| 3 | **Autoresearch loop** — the self-improving core | 🟡 **in progress (Layer 1 ✅; Layer 2 LLM mutator ✅, detector-as-target next)** |
 | 4 | News / sentiment intelligence | ⚪ not started |
 | 5 | Broker integration (paper) | ⚪ not started |
 | 6 | Live capital + ops (dashboard, Telegram) | ⚪ not started |
@@ -41,9 +41,10 @@ and the promoted best holds on the untouched vault. Run it:
 ([runbook](runbooks/autoresearch-training.md)).
 
 ### Layer 2 — LLM mutator
-⚪ not started. Nemotron proposes mutations (replaces the mechanical hill-climb);
-adds the **regime detector itself** as a mutation target. Needs Layer-1 provenance
-first (so nondeterministic runs leave an auditable lineage).
+🟡 **in progress.** ✅ Nemotron proposes regime-conditional mutations (`--llm`;
+`LLMMutator` calls NVIDIA Build / LiteLLM, validates the JSON, safety-falls-back to
+the mechanical mutation on any failure). ⏳ next: the **regime detector itself** as a
+mutation target.
 
 ### Layer 3 — agent fleet
 ⚪ not started. The 7-role Hermes subagent fleet (Orchestrator / Planner / Researcher
@@ -52,5 +53,5 @@ grounding + compressed-replay + Telegram ops. Wraps a loop that already works.
 
 ## Current focus
 
-**Layer 1 is complete** (runnable, real detector, vault-gated, provenance). Next: **Layer 2** (LLM mutator). Capital is only at
+**Layer 1 complete; Layer 2 LLM mutator live** (`--llm`). Next: regime-detector-as-mutation-target, then Layer 3. Capital is only at
 risk from Phase 5 onward; Phases 1–4 are pure research with zero capital.
