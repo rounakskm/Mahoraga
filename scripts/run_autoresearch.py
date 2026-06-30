@@ -27,16 +27,20 @@ ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests/integration/phase-2/calibration/fixtures/spy_daily.csv"
 
 
-def load_spy() -> pd.Series:
+def load_spy() -> tuple[pd.Series, pd.Series | None]:
+    """Return (adj_close price, regimes). From the real OHLCV parquet we use the
+    actual Phase-1 MESO detector; from the adj-close-only fixture, regimes is None
+    (the loop falls back to its inline proxy)."""
     files = sorted(glob.glob(str(ROOT / "data/parquet/ohlcv/SPY/*.parquet")))
     if files:
+        from services.trader.training.regime import meso_regimes
+
         df = pd.concat(pd.read_parquet(f) for f in files).sort_values("bar_timestamp")
-        return pd.Series(
-            df["adj_close"].to_numpy(float),
-            index=pd.to_datetime(df["bar_timestamp"]),
-        )
+        df.index = pd.to_datetime(df["bar_timestamp"])
+        price = df["adj_close"].astype(float)
+        return price, meso_regimes(df)
     df = pd.read_csv(FIXTURE, parse_dates=["date"]).set_index("date")
-    return df["adj_close"].astype(float)
+    return df["adj_close"].astype(float), None
 
 
 def main() -> int:
@@ -45,8 +49,10 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
-    price = load_spy()
+    price, regimes = load_spy()
+    detector = "real Phase-1 MESO detector" if regimes is not None else "inline trend×vol proxy"
     print(f"SPY: {len(price)} bars {price.index[0].date()} -> {price.index[-1].date()}")
+    print(f"regimes: {detector}")
     print(f"running {args.iterations} mechanical iterations through the fortress...\n")
 
     out_dir = ROOT / "data/autoresearch"
@@ -62,7 +68,10 @@ def main() -> int:
         with live.open("a") as fh:
             fh.write(f'{it.index},{it.sharpe:.6f},{it.promoted},{it.is_best},"{it.windows}","{it.reason}"\n')
 
-    res = run_loop(price, iterations=args.iterations, seed=args.seed, on_iteration=on_iter)
+    res = run_loop(
+        price, iterations=args.iterations, seed=args.seed,
+        regimes=regimes, on_iteration=on_iter,
+    )
 
     print(f"\npromoted {res.num_promoted}/{args.iterations} | best daily Sharpe {res.best_sharpe:.4f}")
     print(f"best regime->window: {res.best.windows if res.best else None}")

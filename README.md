@@ -46,6 +46,22 @@ make measure-llm
 make down
 ```
 
+## Start an autoresearch training run (Phase 3)
+
+The self-improving loop is runnable today (Layer 1 — mechanical, no LLM, no
+Postgres, no network; pure Python on real SPY):
+
+```bash
+uv sync
+uv run python scripts/run_autoresearch.py --iterations 50
+```
+
+It mutates a **regime-conditional** strategy, scores each candidate through the
+Phase-2 anti-overfitting fortress, and keeps the best *promoted* one — streaming
+progress live and writing every iteration to `data/autoresearch/<run>.csv` (watch
+it with `tail -f` from another terminal). Full steps + how to read the results:
+[`docs/runbooks/autoresearch-training.md`](docs/runbooks/autoresearch-training.md).
+
 ## Project layout
 
 See [`CLAUDE.md`](CLAUDE.md) "Repo topology" for the canonical map. Brief overview:
