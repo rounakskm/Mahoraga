@@ -10,7 +10,6 @@ from services.trader.training.hindsight_client import HindsightClient
 from services.trader.training.parse_metric import FitnessReport
 from services.trader.training.provenance import candidate_hash
 from services.trader.training.roles import (
-    CATASTROPHIC_DD,
     Decision,
     Guardian,
     Planner,
@@ -110,10 +109,13 @@ def test_guardian_vetoes_a_non_promoted_report():
     assert "fortress rejected" in d.reason
 
 
-def test_guardian_flags_halt_on_catastrophic_drawdown():
-    d = Guardian().review(_report(promoted=True, max_drawdown=CATASTROPHIC_DD - 0.01))
-    assert d.halt is True
-    assert d.approved is False
+def test_guardian_does_not_halt_on_deep_backtest_drawdown():
+    # A promoted candidate with a deep *backtest* drawdown is approved and does NOT
+    # halt the fleet: backtest DD is not the live realized-loss kill-switch. The
+    # fortress already judged risk before promotion.
+    d = Guardian().review(_report(promoted=True, max_drawdown=-0.30))
+    assert d.approved is True
+    assert d.halt is False
 
 
 def test_guardian_passes_a_clean_promoted_report():

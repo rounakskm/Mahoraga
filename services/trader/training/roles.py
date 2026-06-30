@@ -10,8 +10,15 @@ classes — the domain code itself never imports Hermes (CLAUDE.md rule 7).
   Hindsight's `do-not-repeat` memory (recall drops already-failed candidates).
 - Reviewer is the pure hard-rule gate before any compute is spent: exactly one
   change vs the master, no duplicate, windows in range.
-- Guardian is the fortress's veto + halt authority: it passes a non-promoted
-  verdict through and trips the catastrophic-drawdown kill-switch.
+- Guardian is the fortress's veto authority for the training loop: it passes the
+  fortress verdict through (veto a non-promoted candidate, approve a promoted one).
+  It does NOT halt on a candidate's *backtest* drawdown — a backtested strategy
+  drawing down 10% over years is normal (SPY itself drew down ~34% in 2020), not a
+  live catastrophe. The catastrophic-loss kill-switch (CLAUDE.md hard limit: 10%
+  *monthly realized* drawdown -> human review) is a LIVE-execution concern
+  (Phase 5+), fired by the execution monitor on realized P&L via `ops.halt`, not by
+  a backtest metric here. This matches spec §0 re-grounding 3 (Guardian's checks are
+  the metadata-driven walls, not a separate drawdown trip).
 """
 
 from __future__ import annotations
@@ -27,10 +34,6 @@ from services.trader.training.strategy_template import (
     WINDOW_MIN,
     RegimeConditionalStrategy,
 )
-
-# Catastrophic monthly drawdown -> Guardian trips the kill-switch (CLAUDE.md hard
-# risk limit: 10% monthly drawdown requires human review). max_drawdown is signed.
-CATASTROPHIC_DD = -0.10
 
 
 @dataclass(frozen=True)
@@ -138,20 +141,18 @@ class Reviewer:
 
 
 class Guardian:
-    """Fortress veto + halt authority. `gates` is accepted for parity with the
-    rest of the fleet but the verdict is already baked into the report."""
+    """Fortress veto authority for the training loop. Passes the fortress verdict
+    through: veto a non-promoted candidate, approve a promoted one. `gates` is
+    accepted for parity with the rest of the fleet but the verdict (incl. the Risk
+    gate's drawdown check) is already baked into the report. Guardian does NOT halt
+    on backtest drawdown — the live catastrophic-loss kill-switch is fired by the
+    Phase-5+ execution monitor on realized P&L, not here. The `Decision.halt` field
+    stays so an operator/live path can still set it."""
 
     def __init__(self, gates=None) -> None:
         self.gates = gates
 
     def review(self, report: FitnessReport) -> Decision:
-        if report.max_drawdown <= CATASTROPHIC_DD:
-            return Decision(
-                False,
-                f"CATASTROPHIC drawdown {report.max_drawdown:.2%} <= "
-                f"{CATASTROPHIC_DD:.0%}: halting for human review",
-                halt=True,
-            )
         if not report.promoted:
             return Decision(False, f"veto: {report.reason}")
         return Decision(True, report.reason)
