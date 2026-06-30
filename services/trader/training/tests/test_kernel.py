@@ -145,6 +145,20 @@ def test_vault_validation_report_and_ratio_rule():
     assert validate_on_vault(strat, price, regimes, cutoff, train_sharpe=-0.1).holds is False
 
 
+def test_fitness_rewards_quarterly_consistency_and_resilience():
+    from services.trader.training.eval import compute_fitness
+
+    idx = pd.bdate_range("2018-01-01", periods=520)
+    rng = np.random.default_rng(0)
+    consistent = pd.Series(rng.normal(0.0006, 0.004, 520), index=idx)
+    lumpy = consistent.copy()
+    lumpy.iloc[60:130] = -0.012  # a deeply negative quarter -> losing quarter + drawdown
+    fc, fl = compute_fitness(consistent), compute_fitness(lumpy)
+    assert fc.quarterly_win_rate >= fl.quarterly_win_rate
+    assert fc.resilience >= fl.resilience
+    assert fc.score > fl.score  # the resilient, quarter-consistent series wins on fitness
+
+
 def test_candidate_hash_stable_and_order_independent():
     from services.trader.training.provenance import candidate_hash
 
