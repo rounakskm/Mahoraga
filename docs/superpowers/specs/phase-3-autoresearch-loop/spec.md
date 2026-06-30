@@ -1,7 +1,7 @@
 # Phase 3 — Autoresearch Loop Spec
 
 **Status:** Approved 2026-04-26; **revised 2026-06-22** (re-grounded on Hermes + Hindsight + the real Phase-2 fortress; delivery re-layered kernel-first — see §0)
-**Delivery:** 🟡 **In progress.** Layer-1 *kernel* SHIPPED + runnable on real SPY (`strategy_template` + `eval` + `loop` + `scripts/run_autoresearch.py`, PRs #49/#50; runbook [`../../../runbooks/autoresearch-training.md`](../../../runbooks/autoresearch-training.md)). **Layer 1 COMPLETE** (kernel + real RegimeDetector #52 + vault-holdout #54 + provenance: experiments.iterations & strategies.registry). **Layers 2–3 (LLM mutator, agent fleet): not started.**
+**Delivery:** ✅ **Layers 1–3 built & proven on real SPY.** Layer 1 (kernel + real RegimeDetector #52 + vault-holdout #54 + provenance, PRs #49/#50). Layer 2 (LLM Nemotron mutator + learnable regime detector + LLM-tuned thresholds, PRs #58/#59). Layer 3 (seven-role Hermes fleet — orchestrator, roles, promote_pipeline, worker, replay, notebook, Hindsight client, Reporter, Telegram, 7 subagent defs + CI scope guard — PRs #60–#66). Fleet runs end-to-end on real SPY; replay walks ~5 years PIT-clamped; Guardian veto-rate tracks market stress (regime-sensitive). Formal exit sign-off (nightly-8h, DSN race test, recall latency) is the remaining item — see [`../../PROGRESS.md`](../../PROGRESS.md) Layer-3 section. Runbook [`../../../runbooks/autoresearch-training.md`](../../../runbooks/autoresearch-training.md).
 **Type:** Phase-level spec
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md), [`../2026-04-25-nemoclaw-autoresearch-integration.md`](../2026-04-25-nemoclaw-autoresearch-integration.md)
 **Predecessor:** Phases 1 + 2 (complete)
