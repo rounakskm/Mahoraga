@@ -1,0 +1,9 @@
+{
+  "asof": "2026-06-30",
+  "meeting": "2026-07-29",
+  "outcomes": [
+    {"label": "cut_25bp", "probability": 0.12},
+    {"label": "hold", "probability": 0.71},
+    {"label": "hike_25bp", "probability": 0.17}
+  ]
+}
