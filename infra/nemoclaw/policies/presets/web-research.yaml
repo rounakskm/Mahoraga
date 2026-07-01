@@ -1,0 +1,58 @@
+# Mahoraga egress preset — Phase-4 web-research macro sources (REST only).
+# Modeled on the Hindsight preset (presets/hindsight.yaml). The Researcher subagent
+# (infra/nemoclaw/subagents/researcher.md) drives the Python entry point
+# `services.trader.intel.web_research.WebResearcher`, whose only outbound reach is
+# the four public macro-data hosts below. Everything else is denied at the
+# OpenShell sandbox boundary. No MCP — these are plain public HTTPS REST APIs.
+# Applied with:
+#   nemoclaw mahoraga-hermes policy-add --from-file infra/nemoclaw/policies/presets/web-research.yaml
+preset:
+  name: web-research
+  description: "Phase-4 web-research macro sources (FRED, SEC EDGAR, Federal Reserve, CME) — REST egress allowlist"
+
+network_policies:
+  web-research:
+    name: web-research
+    endpoints:
+      # FRED — St. Louis Fed macro release API.
+      - host: api.stlouisfed.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/**" }
+      # SEC EDGAR — filings + submissions/data APIs.
+      - host: www.sec.gov
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/**" }
+      - host: data.sec.gov
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/**" }
+      # Federal Reserve — press releases / RSS.
+      - host: www.federalreserve.gov
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/**" }
+      # CME — FedWatch rate-move probabilities.
+      - host: www.cmegroup.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/**" }
+    # OpenShell egress is enforced PER-BINARY. Allow the Hermes runtime (python
+    # venv + hermes launcher) and curl (for diagnostics) to reach the macro hosts.
+    binaries:
+      - { path: /usr/local/bin/hermes }
+      - { path: /opt/hermes/.venv/bin/python }
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/node }
+      - { path: /usr/bin/curl }
