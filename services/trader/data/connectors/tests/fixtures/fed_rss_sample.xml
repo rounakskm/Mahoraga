@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>FRB: Press Releases</title>
+    <link>https://www.federalreserve.gov/</link>
+    <description>Recent press releases from the Federal Reserve Board.</description>
+    <item>
+      <title>Federal Reserve issues FOMC statement</title>
+      <link>https://www.federalreserve.gov/newsevents/pressreleases/monetary20260429a.htm</link>
+      <pubDate>Wed, 29 Apr 2026 18:00:00 GMT</pubDate>
+      <guid>https://www.federalreserve.gov/newsevents/pressreleases/monetary20260429a.htm</guid>
+    </item>
+    <item>
+      <title>Federal Reserve Board announces enforcement action</title>
+      <link>https://www.federalreserve.gov/newsevents/pressreleases/enforcement20260428a.htm</link>
+      <pubDate>Tue, 28 Apr 2026 14:30:00 GMT</pubDate>
+      <guid>https://www.federalreserve.gov/newsevents/pressreleases/enforcement20260428a.htm</guid>
+    </item>
+  </channel>
+</rss>

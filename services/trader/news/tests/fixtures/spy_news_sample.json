@@ -1,0 +1,46 @@
+{
+  "news": [
+    {
+      "id": 38471002,
+      "author": "Benzinga Newsdesk",
+      "created_at": "2024-03-04T18:36:04Z",
+      "updated_at": "2024-03-04T18:41:12Z",
+      "headline": "Fed's Powell Signals Rate Hike On The Table As Inflation Runs Hot; Hawkish Tone Sinks Stocks",
+      "summary": "Federal Reserve Chair Jerome Powell said the FOMC is prepared to raise rates further if inflation fails to cool, a hawkish shift that sent equities plunging into the close.",
+      "source": "benzinga",
+      "symbols": ["SPY", "QQQ", "DIA"],
+      "url": "https://www.benzinga.com/news/24/03/38471002/feds-powell-signals-rate-hike",
+      "images": [
+        {"size": "large", "url": "https://cdn.benzinga.com/files/imagecache/1024x768xUP/images/story/2024/powell.jpeg"},
+        {"size": "thumb", "url": "https://cdn.benzinga.com/files/imagecache/250x187xUP/images/story/2024/powell.jpeg"}
+      ]
+    },
+    {
+      "id": 38471845,
+      "author": "Reuters",
+      "created_at": "2024-03-04T19:02:47Z",
+      "updated_at": "2024-03-04T19:02:47Z",
+      "headline": "State Street names new CFO effective next quarter",
+      "summary": "State Street Corp said it appointed a new chief financial officer, effective the start of the next quarter, as part of a planned leadership transition.",
+      "source": "reuters",
+      "symbols": ["SPY", "STT"],
+      "url": "https://www.reuters.com/business/finance/state-street-names-new-cfo-2024-03-04/",
+      "images": []
+    },
+    {
+      "id": 38472613,
+      "author": "Benzinga Newsdesk",
+      "created_at": "2024-03-04T21:15:30Z",
+      "updated_at": "2024-03-04T21:20:05Z",
+      "headline": "Nvidia Shares Surge After Earnings Beat, Record Revenue And Upgraded Guidance Lift Broader Market",
+      "summary": "Nvidia stock rallied after the chipmaker crushed earnings estimates, posted record revenue and raised its full-year guidance, lifting the S&P 500 to fresh highs.",
+      "source": "benzinga",
+      "symbols": ["SPY", "NVDA"],
+      "url": "https://www.benzinga.com/news/earnings/24/03/38472613/nvidia-shares-surge-after-earnings-beat",
+      "images": [
+        {"size": "large", "url": "https://cdn.benzinga.com/files/imagecache/1024x768xUP/images/story/2024/nvda.jpeg"}
+      ]
+    }
+  ],
+  "next_page_token": null
+}
