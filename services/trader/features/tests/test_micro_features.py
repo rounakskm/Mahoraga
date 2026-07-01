@@ -1,68 +1,32 @@
 """MICRO momentum + volume-surge feature tests.
 
-Covers `RocFeature` (fractional rate-of-change via `close.pct_change`) and
-`VolumeSurgeFeature` (volume over its rolling mean), including PIT safety:
-altering bars after index `i` must not change the value at `i`.
+``roc_3`` is registered via the existing ``momentum.ROC`` (percentage
+convention, same scale as ``roc_5``); this module owns ``VolumeSurgeFeature``
+(volume over its rolling mean). Both are PIT-safe: altering bars after index
+``i`` must not change the value at ``i``.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
-from services.trader.features.micro import (
-    RocFeature,
-    VolumeSurgeFeature,
-)
+from services.trader.features.micro import VolumeSurgeFeature
+from services.trader.features.momentum import ROC
 from services.trader.features.tests.conftest import make_ctx, synthetic_ohlcv
 
-# --- RocFeature ---------------------------------------------------------
+# --- roc_3 shares the momentum.ROC percentage convention ----------------
 
 
-class TestRocFeature:
-    def test_name_and_metadata(self) -> None:
-        feat = RocFeature(5)
-        assert feat.name == "roc_5"
-        assert feat.category == "momentum"
-        assert feat.placeholder is False
-        assert feat.required_history_bars() == 5
-
-    def test_equals_close_pct_change(self) -> None:
+class TestRoc3ScaleConsistency:
+    def test_roc_3_is_percentage_like_roc_5(self) -> None:
+        # roc_3 registered here MUST match momentum.ROC's 100*pct_change scale,
+        # so the MICRO lens can compare roc_3 and roc_5 magnitudes directly.
         df = synthetic_ohlcv(bars=40)
         ctx = make_ctx(df)
-        roc = RocFeature(5).compute(ctx).reset_index(drop=True)
-        expected = df["close"].astype("float64").reset_index(drop=True).pct_change(5)
-        pd.testing.assert_series_equal(roc, expected, check_names=False, atol=1e-12)
-
-    def test_warmup_is_nan_only(self) -> None:
-        df = synthetic_ohlcv(bars=20)
-        ctx = make_ctx(df)
-        roc = RocFeature(5).compute(ctx).reset_index(drop=True)
-        assert roc.iloc[:5].isna().all()
-        assert roc.iloc[5:].notna().all()
-
-    def test_aligned_to_frame_index(self) -> None:
-        df = synthetic_ohlcv(bars=30)
-        ctx = make_ctx(df)
-        roc = RocFeature(3).compute(ctx)
-        assert list(roc.index) == list(ctx.frame.index)
-
-    def test_pit_safe_future_bars_do_not_change_past(self) -> None:
-        df = synthetic_ohlcv(bars=40)
-        ctx = make_ctx(df)
-        roc_full = RocFeature(5).compute(ctx).reset_index(drop=True)
-
-        # Corrupt every bar strictly after index i; the value at i must be stable.
-        i = 25
-        tampered = df.copy()
-        tampered.loc[tampered.index[i + 1 :], "close"] = 999.0
-        roc_tampered = RocFeature(5).compute(make_ctx(tampered)).reset_index(drop=True)
-
-        pd.testing.assert_series_equal(
-            roc_full.iloc[: i + 1],
-            roc_tampered.iloc[: i + 1],
-            check_names=False,
-            atol=1e-12,
-        )
+        roc3 = ROC(3).compute(ctx).reset_index(drop=True)
+        c = df["close"].astype("float64").reset_index(drop=True)
+        expected = 100.0 * (c - c.shift(3)) / c.shift(3)
+        pd.testing.assert_series_equal(roc3, expected, check_names=False, atol=1e-9)
 
 
 # --- VolumeSurgeFeature -------------------------------------------------

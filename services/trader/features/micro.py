@@ -1,15 +1,17 @@
 """MICRO-lens momentum + volume features.
 
-Two fast, short-horizon inputs to the MICRO regime lens (see Phase-4 plan
-Task 4 / Task 6):
+Fast, short-horizon inputs to the MICRO regime lens (see Phase-4 plan Task 4 /
+Task 6):
 
-- ``roc_3`` / ``roc_5`` — fractional rate-of-change of close over N bars,
-  i.e. ``close.pct_change(N)`` (a return, not a percentage). This is the
-  MICRO lens's short-momentum signal; it is intentionally the plain
-  ``pct_change`` form rather than the ``100 * ...`` percentage that
-  ``momentum.ROC`` emits.
-- ``volume_surge`` — current volume divided by its trailing rolling mean;
-  a value near 1.0 is normal flow, >1 is a surge.
+- ``roc_3`` — 3-bar rate-of-change of close, registered via the *existing*
+  ``momentum.ROC`` class so it shares that module's convention
+  (``100 * pct_change``). ``momentum.py`` already ships ``roc_5``/``roc_10``/
+  ``roc_20``; the MICRO lens's short-momentum signal only needs the extra
+  ``roc_3``. Reusing ``ROC`` keeps ``roc_3`` and ``roc_5`` on the SAME scale so
+  the lens can compare their magnitudes (a fractional variant here would be
+  100x off from ``roc_5`` and silently break momentum-strength comparisons).
+- ``volume_surge`` — current volume divided by its trailing rolling mean; a
+  value near 1.0 is normal flow, >1 is a surge.
 
 All values at bar ``i`` use only data at or before ``i`` (``pct_change`` and
 ``rolling`` look strictly backward), so the features are point-in-time safe.
@@ -25,45 +27,7 @@ from services.trader.features.base import (
     FeatureContext,
     register_feature,
 )
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
-def _close(ctx: FeatureContext) -> pd.Series:
-    return ctx.frame["close"].astype("float64")
-
-
-def _volume(ctx: FeatureContext) -> pd.Series:
-    return ctx.frame["volume"].astype("float64")
-
-
-# ---------------------------------------------------------------------------
-# Rate of Change (fractional)
-# ---------------------------------------------------------------------------
-
-
-class RocFeature(Feature):
-    """Fractional rate-of-change of close: ``close.pct_change(window)``.
-
-    Unlike ``momentum.ROC`` (which multiplies by 100), this returns the raw
-    fractional return over ``window`` bars, matching the MICRO-lens contract.
-    """
-
-    category = "momentum"
-    placeholder = False
-
-    def __init__(self, window: int) -> None:
-        self.window = int(window)
-        self.name = f"roc_{self.window}"
-
-    def required_history_bars(self) -> int:
-        return self.window
-
-    def compute(self, ctx: FeatureContext) -> pd.Series:
-        return _close(ctx).pct_change(self.window).astype("float64")
-
+from services.trader.features.momentum import ROC
 
 # ---------------------------------------------------------------------------
 # Volume surge
@@ -89,7 +53,7 @@ class VolumeSurgeFeature(Feature):
         return self.window
 
     def compute(self, ctx: FeatureContext) -> pd.Series:
-        v = _volume(ctx)
+        v = ctx.frame["volume"].astype("float64")
         mean = v.rolling(self.window).mean()
         return (v / mean).astype("float64")
 
@@ -100,21 +64,15 @@ class VolumeSurgeFeature(Feature):
 
 
 def _register_if_absent(feature: Feature) -> Feature:
-    """Register ``feature`` unless its name is already taken.
-
-    ``momentum.py`` already registers a ``roc_5`` (the percentage variant), so a
-    plain ``register_feature`` here would raise on the duplicate name whenever
-    both modules are imported. The MICRO features are additive; skip any name
-    that is already present rather than crash the registry at import time.
-    """
+    """Register ``feature`` unless its name is already taken (idempotent across
+    imports; ``momentum.py`` owns ``roc_5``+, this module only adds ``roc_3``)."""
     if any(f.name == feature.name for f in BUILTIN_FEATURES):
         return feature
     return register_feature(feature)
 
 
 _REGISTERED_MICRO = [
-    _register_if_absent(RocFeature(window=3)),
-    _register_if_absent(RocFeature(window=5)),
+    _register_if_absent(ROC(3)),  # roc_3 — same 100*pct_change scale as roc_5
     _register_if_absent(VolumeSurgeFeature(window=20)),
 ]
 """Side-effect registration; importing this module fills BUILTIN_FEATURES."""
