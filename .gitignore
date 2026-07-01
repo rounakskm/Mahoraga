@@ -237,3 +237,7 @@ docs/measurements/*.local.md
 
 # Autoresearch run artifacts (durable record is Postgres strategies.registry)
 strategies/*.json
+
+# Phase-3/4 Archivist runtime notebook output (scaffold notes.md/do-not-repeat.md stay tracked)
+services/trader/research/experiments/
+services/trader/research/campaigns/

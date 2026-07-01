@@ -14,7 +14,7 @@ the per-phase specs + `docs/measurements/*-exit-verification.md`.
 | 1 | Data + features + regime detector + backtest harness | ✅ complete (`phase-1-complete`) |
 | 2 | **Anti-overfitting fortress** — 4 walls + 3 gates, RiskLabAI, real-SPY calibration | ✅ complete (`phase-2-complete`) |
 | 3 | **Autoresearch loop** — the self-improving core | ✅ **Layers 1–3 built & proven on real SPY** (fleet runs; replay walks ~5yr; exit-criteria sign-off pending: nightly-8h + DSN race test) |
-| 4 | News / sentiment intelligence (MICRO lens) | 🟡 **in progress** — full-spec build; Alpaca news wired; [plan](superpowers/specs/phase-4-intelligence-layer/plan.md) + [tasks](superpowers/specs/phase-4-intelligence-layer/tasks.md) |
+| 4 | News / sentiment intelligence (MICRO lens) | ✅ **built & proven on live Alpaca news** — full-spec build; 169 real SPY items classified, real PIT sentiment feature; [plan](superpowers/specs/phase-4-intelligence-layer/plan.md) + [tasks](superpowers/specs/phase-4-intelligence-layer/tasks.md) |
 | 5 | Broker integration (paper) | ⚪ not started |
 | 6 | Live capital + ops (dashboard, Telegram) | ⚪ not started |
 | 7 | Full autonomous operation | ⚪ not started |
@@ -81,11 +81,38 @@ Phase 4: an unattended nightly-8h run (≥50 iters), the DSN-backed race-on-prom
 in CI's integration-smoke (already wired, runs on the fresh CI DB), and Hindsight-recall
 latency under a live bank.
 
+## Phase 4 — intelligence layer ✅ built & proven (PRs #67–#72)
+
+The MICRO lens + real-time intelligence, built in 5 waves (13 tasks,
+[plan.md](superpowers/specs/phase-4-intelligence-layer/plan.md) / [tasks.md](superpowers/specs/phase-4-intelligence-layer/tasks.md)):
+- **News pipeline** — `AlpacaNewsClient` (real archive fetch + live-stream stub),
+  `NewsClassifier` (fast local lexicon → CRITICAL/MATERIAL/BACKGROUND + sentiment ∈
+  [-1,1]; FinBERT optional), macro connectors (SEC EDGAR, Fed RSS, CME FedWatch).
+- **Real sentiment** — `SentimentFeature` replaces the Phase-1 placeholder with a PIT
+  sentiment series (leak-canary-tested); `SentimentAggregator` (15-min rolling +
+  Hindsight World Facts).
+- **MICRO lens** — `MicroLens` (momentum/reversal/shock) fills `CompositeRegime.micro`
+  from sentiment + roc_3/roc_5 + volume_surge + realized_vol.
+- **Intelligence** — `TransitionPredictor` (rules + Hindsight-learned overlay),
+  `WebResearcher` (weekly macro brief → Hindsight Mental Model, egress-allowlisted),
+  `ArchivistSynthesis` (Hindsight L2 weekly / L3 monthly).
+- **News-shock protocol** — a CRITICAL item trips the Layer-3 kill-switch (`HaltControl`)
+  + tightened stops + 10-min hold, within seconds.
+
+**Proven on LIVE Alpaca news:** `run_intel.py ingest` classified **169 real SPY items**
+(18 CRITICAL / 35 MATERIAL / 116 BACKGROUND) and the real `SentimentFeature` produced a
+genuine PIT score series varying across [-1,1] over the news flow — the MICRO lens now
+reads real sentiment. Run it: `uv run python scripts/run_intel.py ingest --symbols SPY --start 2024-03-01`.
+
+**Remaining for the formal Phase-4 exit sign-off** (spec §3), not Phase-5 blockers: live
+news-websocket reconnect under load, the 15-min aggregation cadence on a running clock,
+and Hindsight L2/L3 entries accumulating under a live bank.
+
 ## Current focus
 
-**Phase 3 Layers 1–3 built & proven.** The self-improving loop runs the full seven-role
-fleet on real SPY and "experiences" ~5 years of regimes via compressed replay. **Next:
-Phase 4** — news / sentiment intelligence (the MICRO lens; a real sentiment feature
-feeding regime detection + strategy selection). Capital is only at risk from Phase 5
-onward; Phases 1–4 are pure research with zero capital. Live-capital go-live remains a
-human gate (convergence report + explicit sign-off), per CLAUDE.md.
+**Phases 1–4 built & proven.** The self-improving fleet trains on ~5 years of real SPY
+regimes and now reads **real news sentiment** (live Alpaca). **Next: Phase 5** — broker
+integration in **PAPER mode** (Alpaca paper account is live: ACTIVE, $100k paper) behind
+the architectural hard-risk-limit firewall. Capital risk begins at Phase 5 in *paper*
+only; **real-capital go-live remains a human gate** (convergence report + explicit
+sign-off), per CLAUDE.md — the build will stop there for review.
