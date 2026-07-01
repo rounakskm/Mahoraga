@@ -1,6 +1,6 @@
 # Phase 4 — Intelligence Layer Spec
 
-**Status:** Approved 2026-04-26
+**Status:** Approved 2026-04-26; **built & proven on live Alpaca news 2026-07-01** (PRs #67–#72; [plan.md](plan.md) / [tasks.md](tasks.md)). All 7 sub-features shipped: news pipeline (Alpaca) + lexicon classifier + real PIT SentimentFeature + SentimentAggregator + MicroLens + TransitionPredictor + WebResearcher + Archivist L2/L3 + news-shock halt. Live `run_intel.py ingest` classified 169 real SPY items; the real sentiment feature produces genuine PIT scores. Formal exit sign-off (live websocket reconnect under load, running 15-min cadence, L2/L3 accumulation under a live bank) is the remaining item — see [`../../PROGRESS.md`](../../PROGRESS.md) Phase-4 section.
 **Type:** Phase-level spec
 **Phase duration:** 9 weeks
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
