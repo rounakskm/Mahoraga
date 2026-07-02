@@ -52,6 +52,7 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RET"]
 "tests/integration/phase-2/**" = ["N999"]
 "tests/integration/phase-3/**" = ["N999"]
 "tests/integration/phase-4/**" = ["N999"]
+"tests/integration/phase-5/**" = ["N999"]
 
 [tool.mypy]
 python_version = "3.11"
