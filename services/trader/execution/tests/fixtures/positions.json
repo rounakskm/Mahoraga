@@ -1,0 +1,30 @@
+[
+  {
+    "asset_id": "b0b6dd9d-0000-0000-0000-000000000001",
+    "symbol": "SPY",
+    "exchange": "ARCA",
+    "asset_class": "us_equity",
+    "qty": "100",
+    "avg_entry_price": "530.10",
+    "side": "long",
+    "market_value": "54120.00",
+    "cost_basis": "53010.00",
+    "unrealized_pl": "1110.00",
+    "unrealized_plpc": "0.02094",
+    "current_price": "541.20"
+  },
+  {
+    "asset_id": "b0b6dd9d-0000-0000-0000-000000000002",
+    "symbol": "IBIT",
+    "exchange": "NASDAQ",
+    "asset_class": "us_equity",
+    "qty": "500",
+    "avg_entry_price": "40.00",
+    "side": "long",
+    "market_value": "19500.00",
+    "cost_basis": "20000.00",
+    "unrealized_pl": "-500.00",
+    "unrealized_plpc": "-0.025",
+    "current_price": "39.00"
+  }
+]
