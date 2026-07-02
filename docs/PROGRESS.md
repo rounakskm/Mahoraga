@@ -15,7 +15,7 @@ the per-phase specs + `docs/measurements/*-exit-verification.md`.
 | 2 | **Anti-overfitting fortress** — 4 walls + 3 gates, RiskLabAI, real-SPY calibration | ✅ complete (`phase-2-complete`) |
 | 3 | **Autoresearch loop** — the self-improving core | ✅ **Layers 1–3 built & proven on real SPY** (fleet runs; replay walks ~5yr; exit-criteria sign-off pending: nightly-8h + DSN race test) |
 | 4 | News / sentiment intelligence (MICRO lens) | ✅ **built & proven on live Alpaca news** — full-spec build; 169 real SPY items classified, real PIT sentiment feature; [plan](superpowers/specs/phase-4-intelligence-layer/plan.md) + [tasks](superpowers/specs/phase-4-intelligence-layer/tasks.md) |
-| 5 | Broker integration (paper) | ⚪ not started |
+| 5 | Broker integration (paper) | 🟡 **in progress** — firewall-first, dry-run-gated; [plan](superpowers/specs/phase-5-broker-paper-trading/plan.md) + [tasks](superpowers/specs/phase-5-broker-paper-trading/tasks.md) |
 | 6 | Live capital + ops (dashboard, Telegram) | ⚪ not started |
 | 7 | Full autonomous operation | ⚪ not started |
 
