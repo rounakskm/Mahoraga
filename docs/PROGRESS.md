@@ -15,7 +15,7 @@ the per-phase specs + `docs/measurements/*-exit-verification.md`.
 | 2 | **Anti-overfitting fortress** — 4 walls + 3 gates, RiskLabAI, real-SPY calibration | ✅ complete (`phase-2-complete`) |
 | 3 | **Autoresearch loop** — the self-improving core | ✅ **Layers 1–3 built & proven on real SPY** (fleet runs; replay walks ~5yr; exit-criteria sign-off pending: nightly-8h + DSN race test) |
 | 4 | News / sentiment intelligence (MICRO lens) | ✅ **built & proven on live Alpaca news** — full-spec build; 169 real SPY items classified, real PIT sentiment feature; [plan](superpowers/specs/phase-4-intelligence-layer/plan.md) + [tasks](superpowers/specs/phase-4-intelligence-layer/tasks.md) |
-| 5 | Broker integration (paper) | 🟡 **in progress** — firewall-first, dry-run-gated; [plan](superpowers/specs/phase-5-broker-paper-trading/plan.md) + [tasks](superpowers/specs/phase-5-broker-paper-trading/tasks.md) |
+| 5 | Broker integration (paper) | ✅ **code complete; connects to live paper account** — firewall-gated, dry-run default; live paper-order run is a user-gated switch (`--live-orders`); [plan](superpowers/specs/phase-5-broker-paper-trading/plan.md) + [tasks](superpowers/specs/phase-5-broker-paper-trading/tasks.md) |
 | 6 | Live capital + ops (dashboard, Telegram) | ⚪ not started |
 | 7 | Full autonomous operation | ⚪ not started |
 
@@ -108,11 +108,39 @@ reads real sentiment. Run it: `uv run python scripts/run_intel.py ingest --symbo
 news-websocket reconnect under load, the 15-min aggregation cadence on a running clock,
 and Hindsight L2/L3 entries accumulating under a live bank.
 
+## Phase 5 — broker + paper trading ✅ code complete (PRs #74–#79)
+
+Firewall-first, built in 5 waves (12 tasks,
+[plan.md](superpowers/specs/phase-5-broker-paper-trading/plan.md) / [tasks.md](superpowers/specs/phase-5-broker-paper-trading/tasks.md)):
+- **Domain model** — `Order`/`Position`/`Portfolio`/`OrderIntent` (`execution/model.py`);
+  `trades.orders/fills/positions/pnl_daily` (Postgres, migration 007).
+- **Broker** — `AlpacaBrokerClient` (paper account/positions/orders); `submit_order`
+  **defaults `dry_run=True`** (zero network on the default path); graceful no-key.
+- **The architectural firewall** — `HardLimitFirewall` collects ALL violations
+  (position >5%, sector >20%, daily ≤−2%, monthly ≤−10%, regime conf <40%, econ
+  blackout, missing ATR stop); `size_order` (5% clamp), `ComplianceEngine` (PDT +
+  wash-sale, BTC-ETF group), `EconCalendarGate` (FOMC/CPI/NFP), ATR 2× stops.
+- **Executor** — the flow: halt-check → size → **firewall → compliance → (only then)
+  submit**; `live_orders=False` default → every submit is dry-run. A rejected or halted
+  order is architecturally incapable of reaching the broker (asserted by the invariant
+  tests — the Phase-5 exit criterion).
+- **Reconciliation** (local vs broker; halt on >1% notional / phantom) + `TradeStore`
+  (persist to `trades.*`) + `run_paper.py` (account/positions/cycle).
+
+**Proven (read-only) on the LIVE paper account:** `run_paper.py account` reads the real
+Alpaca paper portfolio (equity $100k, buying power $400k, 0 positions). The firewall
+integration smoke proves an over-limit order is rejected and **never reaches the broker**;
+in-limits orders submit **dry-run** by default.
+
+**The live-order switch is a deliberate human gate.** No paper order is submitted unless
+`run_paper.py cycle --live-orders` is passed (prints a ⚠️ banner). The 30-day unattended
+paper window + Sharpe>1.0 readiness gate are operational (Phase-6 monitoring), not code.
+
 ## Current focus
 
-**Phases 1–4 built & proven.** The self-improving fleet trains on ~5 years of real SPY
-regimes and now reads **real news sentiment** (live Alpaca). **Next: Phase 5** — broker
-integration in **PAPER mode** (Alpaca paper account is live: ACTIVE, $100k paper) behind
-the architectural hard-risk-limit firewall. Capital risk begins at Phase 5 in *paper*
-only; **real-capital go-live remains a human gate** (convergence report + explicit
-sign-off), per CLAUDE.md — the build will stop there for review.
+**Phases 1–5 code-complete.** The system trains on ~5yr of real SPY regimes, reads real
+news sentiment, and has a firewall-gated paper-execution path wired to the live Alpaca
+paper account (read-only proven; order submission gated behind `--live-orders`).
+**Next decision is the operator's:** flip on live paper orders for the 30-day window, or
+build Phase 6 ops (dashboard/Telegram monitoring) first. **Real-capital go-live remains a
+human gate** (convergence report + explicit sign-off), per CLAUDE.md — unchanged.

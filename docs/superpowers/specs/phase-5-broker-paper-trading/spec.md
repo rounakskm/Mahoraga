@@ -1,6 +1,6 @@
 # Phase 5 — Broker + Paper Trading Spec
 
-**Status:** Approved 2026-04-26
+**Status:** Approved 2026-04-26; **code complete 2026-07-01** (PRs #74–#79; [plan.md](plan.md) / [tasks.md](tasks.md)). Built firewall-first: domain model + trades.* schema + AlpacaBrokerClient (dry-run default) + hard-limit firewall + sizing + compliance (PDT/wash-sale) + ATR stops + econ-calendar gate + reconciliation + executor + TradeStore + run_paper runner. The architectural firewall invariant (a rejected/halted order NEVER reaches the broker) is asserted by the executor + integration tests. Read-only proven on the live Alpaca paper account. **Live paper-order submission is a user-gated switch (`run_paper.py cycle --live-orders`, default OFF).** Remaining exit items are operational, not code: the 30-day unattended paper window + Sharpe>1.0 readiness gate (run under Phase-6 monitoring). See [`../../PROGRESS.md`](../../PROGRESS.md) Phase-5 section.
 **Type:** Phase-level spec
 **Phase duration:** 8 weeks
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
