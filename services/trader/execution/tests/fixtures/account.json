@@ -1,0 +1,12 @@
+{
+  "id": "a1b2c3d4-0000-0000-0000-000000000000",
+  "account_number": "PA3XXXXXXXXX",
+  "status": "ACTIVE",
+  "currency": "USD",
+  "cash": "48250.75",
+  "equity": "102340.50",
+  "buying_power": "192000.00",
+  "daytrade_count": 2,
+  "portfolio_value": "102340.50",
+  "pattern_day_trader": false
+}
