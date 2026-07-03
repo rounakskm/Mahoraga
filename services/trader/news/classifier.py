@@ -8,7 +8,9 @@ raises a clear error and the caller stays on the lexicon backend.
 
     sentiment = clip((pos - neg) / max(pos + neg, 1), -1, 1)
     impact    = from max trigger weight + symbol breadth
-    level     = CRITICAL on any trigger (or very high impact); else MATERIAL / BACKGROUND
+    level     = CRITICAL on a severe trigger (weight >= 0.8) or impact >= 0.8;
+                weaker triggers -> MATERIAL; else MATERIAL / BACKGROUND on impact
+                and sentiment magnitude
 """
 
 from __future__ import annotations
@@ -17,9 +19,14 @@ import re
 from dataclasses import dataclass
 
 from services.trader.news.alpaca_news import NewsItem
-from services.trader.news.lexicon import NEGATIVE, POSITIVE, URGENCY_TRIGGERS
+from services.trader.news.lexicon import NEGATIVE, POSITIVE, TRIGGER_PATTERNS
 
 _WORD_RE = re.compile(r"[a-z']+")
+
+# Severity gate: only triggers at/above this weight (or very high blended impact)
+# escalate to CRITICAL; weaker triggers (downgrade, recall, ...) cap at MATERIAL.
+_CRITICAL_TRIGGER_WEIGHT = 0.8
+_CRITICAL_IMPACT = 0.8
 
 
 @dataclass(frozen=True)
@@ -47,16 +54,16 @@ class LexiconClassifier:
         neg = sum(1 for t in tokens if t in NEGATIVE)
         sentiment = _clip((pos - neg) / max(pos + neg, 1), -1.0, 1.0)
 
-        hits = [(phrase, w) for phrase, w in URGENCY_TRIGGERS.items() if phrase in text]
+        hits = [(phrase, w) for phrase, w, pattern in TRIGGER_PATTERNS if pattern.search(text)]
         trigger_weight = max((w for _, w in hits), default=0.0)
 
         # Impact blends trigger strength with how broadly the item is tagged.
         symbol_breadth = min(len(item.symbols) / 5.0, 1.0)
         impact = _clip(0.75 * trigger_weight + 0.25 * symbol_breadth, 0.0, 1.0)
 
-        if hits or impact >= 0.8:
+        if trigger_weight >= _CRITICAL_TRIGGER_WEIGHT or impact >= _CRITICAL_IMPACT:
             level = "CRITICAL"
-        elif impact >= 0.4 or abs(sentiment) >= 0.5:
+        elif hits or impact >= 0.4 or abs(sentiment) >= 0.5:
             level = "MATERIAL"
         else:
             level = "BACKGROUND"

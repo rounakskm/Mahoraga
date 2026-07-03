@@ -19,40 +19,40 @@ def _row(adx: float | None, vol_pct: float | None) -> pd.Series:
 class TestMesoLensLabels:
     def test_trending_low_vol(self) -> None:
         result = MesoLens().classify(
-            feature_row=_row(adx=40.0, vol_pct=0.20), macro_row=None
+            feature_row=_row(adx=40.0, vol_pct=20.0), macro_row=None
         )
         assert result.label == "trending_low_vol"
         assert result.confidence > 0.0
 
     def test_trending_high_vol(self) -> None:
         result = MesoLens().classify(
-            feature_row=_row(adx=35.0, vol_pct=0.70), macro_row=None
+            feature_row=_row(adx=35.0, vol_pct=70.0), macro_row=None
         )
         assert result.label == "trending_high_vol"
 
     def test_ranging_low_vol(self) -> None:
         result = MesoLens().classify(
-            feature_row=_row(adx=10.0, vol_pct=0.15), macro_row=None
+            feature_row=_row(adx=10.0, vol_pct=15.0), macro_row=None
         )
         assert result.label == "ranging_low_vol"
 
     def test_ranging_high_vol(self) -> None:
         result = MesoLens().classify(
-            feature_row=_row(adx=12.0, vol_pct=0.80), macro_row=None
+            feature_row=_row(adx=12.0, vol_pct=80.0), macro_row=None
         )
         assert result.label == "ranging_high_vol"
 
     def test_threshold_boundary_picks_trending(self) -> None:
         # adx == 25 is exactly on the boundary; spec says >=25 → trending
         result = MesoLens().classify(
-            feature_row=_row(adx=25.0, vol_pct=0.20), macro_row=None
+            feature_row=_row(adx=25.0, vol_pct=20.0), macro_row=None
         )
         assert result.label == "trending_low_vol"
 
     def test_vol_threshold_boundary_picks_low_vol(self) -> None:
-        # vol_pct == 0.40 is exactly on the boundary; spec says <=0.40 → low_vol
+        # vol_pct == 40.0 is exactly on the boundary; spec says <=40 → low_vol
         result = MesoLens().classify(
-            feature_row=_row(adx=40.0, vol_pct=0.40), macro_row=None
+            feature_row=_row(adx=40.0, vol_pct=40.0), macro_row=None
         )
         assert result.label == "trending_low_vol"
 
@@ -60,7 +60,7 @@ class TestMesoLensLabels:
 class TestMesoLensUndefined:
     def test_nan_adx_returns_undefined(self) -> None:
         result = MesoLens().classify(
-            feature_row=_row(adx=float("nan"), vol_pct=0.20), macro_row=None
+            feature_row=_row(adx=float("nan"), vol_pct=20.0), macro_row=None
         )
         assert result.label == UNDEFINED_LABEL
         assert result.confidence == 0.0
@@ -83,7 +83,7 @@ class TestMesoLensUndefined:
 class TestMesoConfidenceMath:
     def test_clean_quadrant_gets_high_confidence(self) -> None:
         # adx=50 → trend_conf = (50-25)/25 = 1.0
-        # vol_pct=0.0 → vol_conf = (0-0.40)/0.40 = -1.0 (low-vol direction)
+        # vol_pct=0.0 → vol_conf = (0-40)/40 = -1.0 (low-vol direction)
         # min(|1.0|, |1.0|) = 1.0
         result = MesoLens().classify(
             feature_row=_row(adx=50.0, vol_pct=0.0), macro_row=None
@@ -93,19 +93,19 @@ class TestMesoConfidenceMath:
 
     def test_borderline_gets_low_confidence(self) -> None:
         # adx=26 → trend_conf = 1/25 = 0.04
-        # vol_pct=0.41 → vol_conf = 0.01/0.40 = 0.025
+        # vol_pct=41.0 → vol_conf = 1/40 = 0.025
         # min(0.04, 0.025) = 0.025
         result = MesoLens().classify(
-            feature_row=_row(adx=26.0, vol_pct=0.41), macro_row=None
+            feature_row=_row(adx=26.0, vol_pct=41.0), macro_row=None
         )
         assert result.confidence < 0.05
         assert result.label == "trending_high_vol"
 
     def test_inputs_snapshot_preserved(self) -> None:
         result = MesoLens().classify(
-            feature_row=_row(adx=30.0, vol_pct=0.30), macro_row=None
+            feature_row=_row(adx=30.0, vol_pct=30.0), macro_row=None
         )
-        assert result.inputs == {"adx_14": 30.0, "realized_vol_pct_60": 0.30}
+        assert result.inputs == {"adx_14": 30.0, "realized_vol_pct_60": 30.0}
 
 
 class TestMesoLensContract:

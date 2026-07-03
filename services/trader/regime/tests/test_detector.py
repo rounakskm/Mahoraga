@@ -37,7 +37,7 @@ def _feature_frame() -> pd.DataFrame:
                 ["2026-01-05", "2026-01-06", "2026-01-07"], utc=True
             ),
             "adx_14": [40.0, 12.0, 30.0],
-            "realized_vol_pct_60": [0.20, 0.80, 0.50],
+            "realized_vol_pct_60": [20.0, 80.0, 50.0],
         }
     )
 
@@ -71,7 +71,7 @@ class TestRegimeDetectorBasic:
         assert len(result.inputs_by_bar) == 3
         assert result.inputs_by_bar[0] == {
             "adx_14": 40.0,
-            "realized_vol_pct_60": 0.20,
+            "realized_vol_pct_60": 20.0,
         }
 
     def test_lens_exception_is_isolated(self) -> None:

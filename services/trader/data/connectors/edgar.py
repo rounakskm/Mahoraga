@@ -4,8 +4,10 @@ Pulls a company's recent filings from the SEC submissions API
 (`data.sec.gov/submissions/CIK##########.json`) and filters to material-event
 8-K filings on or after a cutoff date.
 
-The SEC requires a descriptive `User-Agent` on every request
-(https://www.sec.gov/os/webmaster-faq#developers). Callers must pass one.
+The SEC requires a descriptive `User-Agent` with a real, reachable contact on
+every request (https://www.sec.gov/os/webmaster-faq#developers). The default
+below is a placeholder — replace it with a real contact address before any
+live/production use, or the SEC may block the requests.
 
 Graceful-offline: any fetch or parse error returns `[]`, never raises.
 """
@@ -52,7 +54,7 @@ class EdgarConnector:
 
     def __init__(
         self,
-        user_agent: str = "Mahoraga research contact@example.com",
+        user_agent: str = "Mahoraga research (ops@mahoraga.local)",
         *,
         timeout: float = 30.0,
     ) -> None:

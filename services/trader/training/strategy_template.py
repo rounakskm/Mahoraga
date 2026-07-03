@@ -42,9 +42,10 @@ def label_regimes(price: pd.Series) -> pd.Series:
 
 
 # Detector thresholds are also a mutation target (Layer 2): the MESO defaults
-# (adx>=25, vol_pct>0.40) ship from Phase 1, but vol_pct ranges [0,100] so 0.40 is
-# mis-scaled (≈always high-vol). Making the threshold learnable lets the loop
-# self-correct toward a balanced regime split without touching Phase-1.
+# (adx>=25, vol_pct>40.0) ship from Phase 1 on the 0-100 percentile scale — the
+# 40th-percentile default gives a balanced low/high-vol split (the historical
+# 0.40 mis-scaling is fixed at the source; see services/trader/regime/meso.py).
+# Keeping the threshold learnable still lets the loop tune the split per asset.
 ADX_T_MIN, ADX_T_MAX = 10.0, 40.0
 VOL_T_MIN, VOL_T_MAX = 5.0, 80.0
 
@@ -55,7 +56,7 @@ class RegimeConditionalStrategy:
 
     windows: dict[str, int]
     adx_threshold: float = 25.0
-    vol_threshold: float = 0.40
+    vol_threshold: float = 40.0  # 0-100 percentile scale, matches the MESO lens
 
     @classmethod
     def seed(cls) -> RegimeConditionalStrategy:
