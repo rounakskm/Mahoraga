@@ -14,12 +14,28 @@ the halt state. Clearing the halt unlinks the file.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+# halt.py lives at <repo>/services/trader/ops/halt.py, so parents[3] is the repo
+# root: parents[0]=ops, [1]=trader, [2]=services, [3]=<repo>.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _default_flag_path() -> Path:
+    """`MAHORAGA_HALT_FLAG` when set; else `data/control/halt.flag` anchored to the
+    repo root (NOT the cwd — every process must see the same kill-switch)."""
+    env = os.environ.get("MAHORAGA_HALT_FLAG")
+    if env:
+        return Path(env)
+    return _REPO_ROOT / "data" / "control" / "halt.flag"
 
 
 class HaltControl:
-    def __init__(self, flag_path: str | Path = "data/control/halt.flag") -> None:
-        self.flag_path = Path(flag_path)
+    def __init__(self, flag_path: str | Path | None = None) -> None:
+        self.flag_path = (
+            Path(flag_path) if flag_path is not None else _default_flag_path()
+        )
 
     def halt(self, reason: str = "") -> None:
         """Trip the kill-switch; `reason` is persisted in the flag file."""

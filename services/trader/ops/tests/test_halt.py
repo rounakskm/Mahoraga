@@ -33,6 +33,26 @@ def test_resume_is_idempotent_when_not_halted(tmp_path: Path) -> None:
     assert h.is_halted() is False
 
 
+def test_env_var_overrides_default_flag_path(tmp_path: Path, monkeypatch) -> None:
+    flag = tmp_path / "env" / "halt.flag"
+    monkeypatch.setenv("MAHORAGA_HALT_FLAG", str(flag))
+    h = HaltControl()
+    assert h.flag_path == flag
+    h.halt("via env")
+    assert flag.exists()
+    assert HaltControl().is_halted() is True
+
+
+def test_default_path_anchors_to_repo_root_not_cwd(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("MAHORAGA_HALT_FLAG", raising=False)
+    monkeypatch.chdir(tmp_path)  # a stray cwd must not move the kill-switch
+    h = HaltControl()
+    repo_root = Path(__file__).resolve().parents[4]
+    assert h.flag_path == repo_root / "data" / "control" / "halt.flag"
+    assert h.flag_path.is_absolute()
+    assert tmp_path not in h.flag_path.parents
+
+
 def test_flag_is_visible_to_a_second_process_view(tmp_path: Path) -> None:
     flag = tmp_path / "control" / "halt.flag"
     writer = HaltControl(flag_path=flag)

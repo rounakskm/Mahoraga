@@ -20,7 +20,7 @@ def _feature_frame() -> pd.DataFrame:
                 ["2026-01-05", "2026-01-06"], utc=True
             ),
             "adx_14": [40.0, 12.0],
-            "realized_vol_pct_60": [0.0, 0.80],
+            "realized_vol_pct_60": [0.0, 80.0],
         }
     )
 

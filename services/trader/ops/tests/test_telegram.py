@@ -61,6 +61,44 @@ def test_unknown_command_returns_help(tmp_path: Path) -> None:
     assert "/status" in reply
 
 
+def _update(text: str | None = "/status", chat_id: object = 42) -> dict:
+    message: dict = {}
+    if text is not None:
+        message["text"] = text
+    if chat_id is not None:
+        message["chat"] = {"id": chat_id}
+    return {"update_id": 1, "message": message}
+
+
+def test_should_act_open_when_no_allowlist(tmp_path: Path) -> None:
+    ops = _ops(tmp_path)
+    assert ops._should_act(_update()) is True
+
+
+def test_should_act_allows_listed_chat(tmp_path: Path) -> None:
+    ops = TelegramOps(
+        HaltControl(tmp_path / "halt.flag"), Reporter(None),
+        token=None, allowed_chat_ids={"42"},
+    )
+    assert ops._should_act(_update(chat_id=42)) is True
+
+
+def test_should_act_ignores_unlisted_chat(tmp_path: Path) -> None:
+    ops = TelegramOps(
+        HaltControl(tmp_path / "halt.flag"), Reporter(None),
+        token=None, allowed_chat_ids={"42"},
+    )
+    assert ops._should_act(_update(chat_id=666)) is False
+    assert ops.halt.is_halted() is False  # ignored means no action, ever
+
+
+def test_should_act_ignores_updates_without_text_or_chat(tmp_path: Path) -> None:
+    ops = _ops(tmp_path)
+    assert ops._should_act(_update(text=None)) is False
+    assert ops._should_act(_update(chat_id=None)) is False
+    assert ops._should_act({"update_id": 9}) is False
+
+
 def test_poll_without_token_raises(tmp_path: Path) -> None:
     ops = _ops(tmp_path)
     try:

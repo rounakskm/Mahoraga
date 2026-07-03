@@ -61,6 +61,27 @@ def test_state_empty_is_zero() -> None:
     assert state.n == 0
 
 
+def test_state_accepts_tz_naive_asof() -> None:
+    # A naive asof is treated as UTC (same normalization as features/sentiment.py).
+    items = [
+        NewsItem(
+            id=1,
+            created_at=pd.Timestamp("2024-01-01T12:00:00Z"),
+            headline="strong beat guidance raised profit surge",
+            summary="",
+            symbols=["SPY"],
+            source="test",
+            url="http://x",
+        )
+    ]
+    agg = SentimentAggregator()
+    agg.ingest(items)
+    state = agg.state("SPY", pd.Timestamp("2024-01-02"))  # tz-naive
+    assert isinstance(state, SentimentState)
+    assert state.n == 1
+    assert state.score > 0.0
+
+
 def test_state_respects_asof() -> None:
     items = [_item(1, "gain upside rally beat", 2.0)]
     agg = SentimentAggregator()
@@ -85,6 +106,7 @@ def test_ingest_retains_material_and_critical_only() -> None:
     assert n_material_plus >= 1
     assert len(hs.calls) == n_material_plus  # exactly non-BACKGROUND retained
     for _text, meta in hs.calls:
+        assert meta["kind"] == "world_fact"
         assert meta["ticker"] == "SPY"
         assert meta["classification"] in {"MATERIAL", "CRITICAL"}
         assert "sentiment" in meta

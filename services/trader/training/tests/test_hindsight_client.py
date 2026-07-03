@@ -40,48 +40,72 @@ def test_default_bank():
     assert HindsightClient(None, bank="other").bank == "other"
 
 
-# --- the enabled path: assert URL/bank shape via a transport stub ---
+# --- the enabled path: assert the REAL vendored API paths/bodies via a stub ---
+# (vendor/hindsight/hindsight-api-slim/hindsight_api/api/http.py)
 
 
 class _Fake(HindsightClient):
-    """Records the calls _post/_get would have made instead of hitting the network."""
+    """Records the calls _post would have made instead of hitting the network."""
 
     def __init__(self, **kw):
         super().__init__(base_url="http://hindsight:8888", **kw)
         self.posts: list[tuple[str, dict]] = []
-        self.gets: list[tuple[str, dict]] = []
-        self.post_return: dict = {"id": "fact-123"}
-        self.get_return: dict = {"results": [{"text": "hi", "score": 0.9}]}
+        # RetainResponse / RecallResponse shapes from the vendored API.
+        self.retain_return: dict = {
+            "success": True, "bank_id": "mahoraga-trader", "items_count": 1,
+            "async": False,
+        }
+        self.recall_return: dict = {
+            "results": [{"id": "f1", "text": "hi", "type": "experience",
+                         "metadata": {"candidate_hash": "abc"}}],
+        }
 
     def _post(self, path: str, payload: dict) -> dict:
         self.posts.append((path, payload))
-        return self.post_return
-
-    def _get(self, path: str, params: dict) -> dict:
-        self.gets.append((path, params))
-        return self.get_return
+        if path.endswith("/memories/recall"):
+            return self.recall_return
+        return self.retain_return
 
 
-def test_enabled_retain_posts_to_bank():
+def test_enabled_retain_posts_items_to_memories_endpoint():
     c = _Fake()
-    fact_id = c.retain("a trade context", {"regime": "trending"})
-    assert fact_id == "fact-123"
+    marker = c.retain("a trade context", {"regime": "trending", "n": 3})
+    assert marker is not None  # success marker on the real success:true response
     path, payload = c.posts[-1]
-    assert c.bank in path or payload.get("bank") == c.bank
-    assert payload["text"] == "a trade context"
-    assert payload["metadata"] == {"regime": "trending"}
+    assert path == f"/v1/default/banks/{c.bank}/memories"
+    (item,) = payload["items"]
+    assert item["content"] == "a trade context"
+    # metadata values are coerced to strings (API schema: dict[str, str])
+    assert item["metadata"] == {"regime": "trending", "n": "3"}
 
 
-def test_enabled_recall_returns_results_list():
+def test_enabled_recall_posts_query_and_returns_results_list():
     c = _Fake()
     out = c.recall("query text", k=3)
-    assert out == [{"text": "hi", "score": 0.9}]
-    path, params = c.gets[-1]
-    assert c.bank in path or params.get("bank") == c.bank
+    assert out == c.recall_return["results"]
+    path, payload = c.posts[-1]
+    assert path == f"/v1/default/banks/{c.bank}/memories/recall"
+    assert payload["query"] == "query text"
 
 
-def test_enabled_reflect_posts():
+def test_enabled_recall_slices_to_k():
+    c = _Fake()
+    c.recall_return = {"results": [{"id": str(i), "text": "t"} for i in range(9)]}
+    assert len(c.recall("q", k=2)) == 2
+
+
+def test_enabled_reflect_posts_query():
     c = _Fake()
     assert c.reflect() is None
-    path, _payload = c.posts[-1]
-    assert "reflect" in path
+    path, payload = c.posts[-1]
+    assert path == f"/v1/default/banks/{c.bank}/reflect"
+    assert isinstance(payload["query"], str) and payload["query"]
+
+
+def test_first_failure_warns_once_then_stays_quiet(caplog):
+    c = HindsightClient("http://127.0.0.1:9/unreachable", timeout=0.05)
+    with caplog.at_level("WARNING", logger="services.trader.training.hindsight_client"):
+        assert c.retain("x", {}) is None
+        assert c.recall("x") == []
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1  # one-time, not per-call

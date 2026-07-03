@@ -60,6 +60,64 @@ def test_strong_earnings_beat_is_positive_and_material_or_critical() -> None:
     assert c.level in {"MATERIAL", "CRITICAL"}
 
 
+# --- word-boundary trigger matching (review B1) -----------------------------
+
+
+def test_award_headline_is_not_critical() -> None:
+    # "award" must not substring-match the "war" trigger.
+    c = NewsClassifier(backend="lexicon").classify(
+        _item("Apple wins design award for new hardware")
+    )
+    assert c.level != "CRITICAL"
+
+
+def test_warner_bros_is_not_critical() -> None:
+    # "Warner" must not substring-match the "war" trigger.
+    c = NewsClassifier(backend="lexicon").classify(
+        _item("Warner Bros reports quarterly results")
+    )
+    assert c.level != "CRITICAL"
+
+
+def test_wary_fed_officials_not_critical_from_war_trigger() -> None:
+    # "wary" must not substring-match "war"; no severe trigger fires here.
+    c = NewsClassifier(backend="lexicon").classify(
+        _item("Fed officials wary of cutting too soon")
+    )
+    assert c.level != "CRITICAL"
+    assert "war" not in c.rationale.split("triggers=")[-1]
+
+
+def test_actual_war_headline_is_critical() -> None:
+    c = NewsClassifier(backend="lexicon").classify(
+        _item("Oil spikes as war escalates in the region")
+    )
+    assert c.level == "CRITICAL"
+
+
+# --- severity gate: not every trigger is CRITICAL (review B2) ---------------
+
+
+def test_analyst_downgrade_is_material_not_critical() -> None:
+    # A routine single-name downgrade is a weak trigger (< 0.8) -> MATERIAL.
+    c = NewsClassifier(backend="lexicon").classify(
+        _item("Analyst downgrades small-cap retailer")
+    )
+    assert c.level == "MATERIAL"
+
+
+def test_fomc_rate_decision_is_critical() -> None:
+    c = NewsClassifier(backend="lexicon").classify(_item("FOMC raises rates 50bp"))
+    assert c.level == "CRITICAL"
+
+
+def test_recall_is_material_not_critical() -> None:
+    c = NewsClassifier(backend="lexicon").classify(
+        _item("Automaker announces recall of 12,000 vehicles over sensor issue")
+    )
+    assert c.level == "MATERIAL"
+
+
 def test_classify_makes_no_network_call(monkeypatch) -> None:
     import httpx
 

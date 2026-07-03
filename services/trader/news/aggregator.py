@@ -68,8 +68,13 @@ class SentimentAggregator:
         return classifications
 
     def state(self, symbol: str, asof: pd.Timestamp) -> SentimentState:
-        """Weighted 24h/7d/30d rolling sentiment for `symbol` visible at `asof`."""
+        """Weighted 24h/7d/30d rolling sentiment for `symbol` visible at `asof`.
+
+        A tz-naive `asof` is localized to UTC (same normalization as
+        `features/sentiment.py`); tz-aware values are converted to UTC.
+        """
         asof = pd.Timestamp(asof)
+        asof = asof.tz_localize("UTC") if asof.tzinfo is None else asof.tz_convert("UTC")
         visible = [
             (item, cls)
             for item, cls in self._history
@@ -110,6 +115,7 @@ class SentimentAggregator:
         ticker = item.symbols[0] if item.symbols else ""
         text = f"[{classification.level}] {item.headline}"
         metadata = {
+            "kind": "world_fact",
             "ticker": ticker,
             "classification": classification.level,
             "sentiment": classification.sentiment,

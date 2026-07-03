@@ -22,6 +22,19 @@ class ReplayStep:
     train_price: pd.Series
     train_regimes: pd.Series
 
+    def __post_init__(self) -> None:
+        # The real leak canary: a slice that extends past `asof` is a look-ahead
+        # bias, rejected at construction (architectural, not advisory).
+        for name, series in (
+            ("train_price", self.train_price),
+            ("train_regimes", self.train_regimes),
+        ):
+            if len(series) and series.index.max() > self.asof:
+                raise ValueError(
+                    f"PIT violation: {name} extends to {series.index.max()} "
+                    f"> asof {self.asof}"
+                )
+
 
 class ReplayClock:
     """Yield expanding PIT slices from ``start`` to ``vault_cutoff`` in ``step_days``

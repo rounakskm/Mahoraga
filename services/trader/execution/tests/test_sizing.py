@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from services.trader.execution.model import (
     Order,
     OrderIntent,
@@ -84,7 +86,24 @@ def test_non_positive_equity_returns_none() -> None:
 
 
 def test_side_matches_intent_sell() -> None:
-    order = size_order(_intent(side=Side.SELL), _portfolio(), price=50.0)
+    order = size_order(
+        _intent(side=Side.SELL, target_weight=-0.10), _portfolio(), price=50.0
+    )
     assert order is not None
     assert order.side is Side.SELL
     assert order.qty == 100.0  # magnitude, sign-independent
+
+
+# ---------------------------------------------------------------------------
+# C10 — side/weight sign mismatch is a caller bug and must raise, not size.
+# ---------------------------------------------------------------------------
+
+
+def test_buy_with_negative_weight_raises() -> None:
+    with pytest.raises(ValueError, match="mismatch"):
+        size_order(_intent(side=Side.BUY, target_weight=-0.03), _portfolio(), price=50.0)
+
+
+def test_sell_with_positive_weight_raises() -> None:
+    with pytest.raises(ValueError, match="mismatch"):
+        size_order(_intent(side=Side.SELL, target_weight=0.03), _portfolio(), price=50.0)

@@ -171,7 +171,7 @@ class TestLabelMatrixSweep:
     def test_trending_low_vol_x_bull(self) -> None:
         r = self._detector().classify(
             scope="u",
-            feature_frame=self._feature(40, 0.2),
+            feature_frame=self._feature(40, 20.0),
             macro_frame=self._macro(0.5, 14.0, -1.0),
         )
         assert r.rows[0].meso == "trending_low_vol"
@@ -180,7 +180,7 @@ class TestLabelMatrixSweep:
     def test_trending_high_vol_x_bear(self) -> None:
         r = self._detector().classify(
             scope="u",
-            feature_frame=self._feature(40, 0.8),
+            feature_frame=self._feature(40, 80.0),
             macro_frame=self._macro(-0.1, 35.0, 1.5),
         )
         assert r.rows[0].meso == "trending_high_vol"
@@ -189,7 +189,7 @@ class TestLabelMatrixSweep:
     def test_ranging_low_vol_x_transitioning(self) -> None:
         r = self._detector().classify(
             scope="u",
-            feature_frame=self._feature(10, 0.2),
+            feature_frame=self._feature(10, 20.0),
             # curve +1, vix -1 (high), dxy +1 → score 1/3 → transitioning
             macro_frame=self._macro(0.3, 30.0, -0.5),
         )
@@ -199,7 +199,7 @@ class TestLabelMatrixSweep:
     def test_ranging_high_vol_x_bull(self) -> None:
         r = self._detector().classify(
             scope="u",
-            feature_frame=self._feature(12, 0.8),
+            feature_frame=self._feature(12, 80.0),
             macro_frame=self._macro(0.5, 14.0, -1.0),
         )
         assert r.rows[0].meso == "ranging_high_vol"

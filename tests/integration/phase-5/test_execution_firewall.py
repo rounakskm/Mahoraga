@@ -90,7 +90,7 @@ def _intents() -> list[OrderIntent]:
     return [in_limits, over_limit]
 
 
-def test_firewall_invariant_over_limit_rejected_in_limits_dry_run() -> None:
+def test_firewall_invariant_over_limit_rejected_in_limits_dry_run(tmp_path) -> None:
     """Over-limit intent never reaches the broker; in-limits is dry-run submitted."""
     now = pd.Timestamp("2026-07-01", tz="UTC")
     broker = _StubBroker()
@@ -98,7 +98,7 @@ def test_firewall_invariant_over_limit_rejected_in_limits_dry_run() -> None:
         broker=broker,
         firewall=HardLimitFirewall(),
         compliance=ComplianceEngine(),
-        halt=HaltControl(flag_path="/tmp/mahoraga-p5-never-halted.flag"),
+        halt=HaltControl(flag_path=tmp_path / "never-halted.flag"),
         live_orders=False,
     )
 
@@ -151,3 +151,64 @@ def test_pre_halted_control_stops_cycle_zero_submits(tmp_path) -> None:
     assert report.halted is True
     assert report.submitted == 0
     assert broker.calls == []
+
+
+def test_existing_holding_plus_order_breaches_position_limit(tmp_path) -> None:
+    """C1+C2 pin: ctx built EXACTLY as run_paper does (via `build_firewall_context`,
+    un-clamped notional, sized/clamped order) rejects a 4% add-on to an existing 4%
+    same-ticker position — 8% resulting exposure > the 5% hard cap — and the broker
+    is never called."""
+    from services.trader.execution.context import build_firewall_context
+    from services.trader.execution.model import Position
+
+    now = pd.Timestamp("2026-07-01", tz="UTC")
+    broker = _StubBroker()
+    portfolio = Portfolio(
+        equity=_EQUITY,
+        cash=_EQUITY,
+        buying_power=_EQUITY,
+        positions={
+            "SPY": Position(
+                ticker="SPY",
+                qty=40.0,
+                avg_entry=_PRICE,
+                market_value=0.04 * _EQUITY,  # existing 4% SPY position
+                unrealized_pl=0.0,
+                sector="ETF",
+            )
+        },
+    )
+    intent = OrderIntent(
+        ticker="SPY",
+        side=Side.BUY,
+        target_weight=0.04,  # 4% add-on: alone it passes, on top of 4% it must not
+        reason="add-on entry over the combined position cap",
+        regime_confidence=0.80,
+        stop_price=_STOP,
+    )
+
+    def ctx_for(order_intent: OrderIntent, order: Order):
+        return build_firewall_context(
+            order_intent,
+            order,
+            portfolio,
+            now=now,
+            price=_PRICE,
+            daily_pl_pct=0.0,
+            monthly_pl_pct=0.0,
+            sector_map={"SPY": "ETF"},
+        )
+
+    executor = Executor(
+        broker=broker,
+        firewall=HardLimitFirewall(),
+        compliance=ComplianceEngine(),
+        halt=HaltControl(flag_path=tmp_path / "never-halted.flag"),
+        live_orders=False,
+    )
+    report = executor.run_cycle([intent], portfolio, prices={"SPY": _PRICE}, ctx_for=ctx_for)
+
+    assert report.submitted == 0
+    assert report.rejected == 1
+    assert broker.calls == []  # the over-cap add-on NEVER reached the broker
+    assert any("position limit" in r for r in report.rejections)

@@ -186,3 +186,84 @@ def test_record_daily_pnl_upserts(store: TradeStore) -> None:
     ).fetchall()
     assert len(rows) == 1
     assert rows[0] == (101_000.0, 600.0, 250.0)
+
+
+# ---------------------------------------------------------------------------
+# C3/C7 — recent_trades + latest_positions: disabled no-op contract.
+# ---------------------------------------------------------------------------
+
+
+def test_recent_trades_empty_when_disabled() -> None:
+    store = TradeStore(None)
+    assert store.recent_trades() == []
+    assert store._conn is None
+
+
+def test_latest_positions_none_when_disabled() -> None:
+    store = TradeStore(None)
+    assert store.latest_positions() is None
+    assert store._conn is None
+
+
+@pytest.mark.skipif(not DSN, reason="MAHORAGA_DSN not set")
+def test_recent_trades_round_trip(store: TradeStore) -> None:
+    """A filled BUY + loss-closing SELL on the same day come back as TradeRecords
+    with a negative realized_pl on the sell and is_day_trade=True on both."""
+    from services.trader.execution.compliance import TradeRecord
+
+    buy = Order(
+        id="b-1",
+        ticker=_TEST_TICKER,
+        side=Side.BUY,
+        qty=10.0,
+        order_type=OrderType.MARKET,
+        limit_price=None,
+        stop_price=None,
+        status=OrderStatus.FILLED,
+        filled_qty=10.0,
+        filled_avg_price=50.0,
+    )
+    sell = Order(
+        id="s-1",
+        ticker=_TEST_TICKER,
+        side=Side.SELL,
+        qty=10.0,
+        order_type=OrderType.MARKET,
+        limit_price=None,
+        stop_price=None,
+        status=OrderStatus.FILLED,
+        filled_qty=10.0,
+        filled_avg_price=48.0,  # sold below the 50.0 buy -> realized loss
+    )
+    store.record_order(buy, "test buy")
+    store.record_order(sell, "test sell")
+
+    records = [t for t in store.recent_trades(days=35) if t.ticker == _TEST_TICKER]
+    assert len(records) == 2
+    assert all(isinstance(t, TradeRecord) for t in records)
+    sells = [t for t in records if t.side is Side.SELL]
+    assert sells and sells[0].realized_pl < 0
+    assert all(t.is_day_trade for t in records)  # same-ticker buy+sell same date
+
+
+@pytest.mark.skipif(not DSN, reason="MAHORAGA_DSN not set")
+def test_latest_positions_round_trip(store: TradeStore) -> None:
+    portfolio = Portfolio(
+        equity=100_000.0,
+        cash=50_000.0,
+        buying_power=50_000.0,
+        positions={
+            _TEST_TICKER: Position(
+                ticker=_TEST_TICKER,
+                qty=100.0,
+                avg_entry=50.0,
+                market_value=5_000.0,
+                unrealized_pl=0.0,
+            )
+        },
+    )
+    store.snapshot_positions(portfolio)
+    latest = store.latest_positions()
+    assert latest is not None
+    assert _TEST_TICKER in latest
+    assert latest[_TEST_TICKER].qty == 100.0
