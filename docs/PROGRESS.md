@@ -16,7 +16,7 @@ the per-phase specs + `docs/measurements/*-exit-verification.md`.
 | 3 | **Autoresearch loop** — the self-improving core | ✅ **Layers 1–3 built & proven on real SPY** (fleet runs; replay walks ~5yr; exit-criteria sign-off pending: nightly-8h + DSN race test) |
 | 4 | News / sentiment intelligence (MICRO lens) | ✅ **built & proven on live Alpaca news** — full-spec build; 169 real SPY items classified, real PIT sentiment feature; [plan](superpowers/specs/phase-4-intelligence-layer/plan.md) + [tasks](superpowers/specs/phase-4-intelligence-layer/tasks.md) |
 | 5 | Broker integration (paper) | ✅ **code complete; connects to live paper account** — firewall-gated, dry-run default; live paper-order run is a user-gated switch (`--live-orders`); [plan](superpowers/specs/phase-5-broker-paper-trading/plan.md) + [tasks](superpowers/specs/phase-5-broker-paper-trading/tasks.md) |
-| 6 | Live capital + ops (dashboard, Telegram) | ⚪ not started |
+| 6 | Governance + live prep (dashboard, Telegram, audit, convergence) | 🟡 **in progress** — [plan](superpowers/specs/phase-6-governance-live-prep/plan.md) + [tasks](superpowers/specs/phase-6-governance-live-prep/tasks.md) |
 | 7 | Full autonomous operation | ⚪ not started |
 
 ## Phase 3 — layer detail (the heart of the system)
