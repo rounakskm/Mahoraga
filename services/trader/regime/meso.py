@@ -1,11 +1,13 @@
 """MESO regime lens — trend × volatility cross.
 
-Rule-based per `regime-detector-spec.md` §2:
+Rule-based per `regime-detector-spec.md` §2. `realized_vol_pct_60` is a
+percentile rank on the 0-100 scale; the 40th-percentile threshold (the
+long-run median split) divides low-vol from high-vol:
 
-- `trending_low_vol`  : `adx_14 >= 25` AND `realized_vol_pct_60 <= 0.40`
-- `trending_high_vol` : `adx_14 >= 25` AND `realized_vol_pct_60 > 0.40`
-- `ranging_low_vol`   : `adx_14 < 25`  AND `realized_vol_pct_60 <= 0.40`
-- `ranging_high_vol`  : `adx_14 < 25`  AND `realized_vol_pct_60 > 0.40`
+- `trending_low_vol`  : `adx_14 >= 25` AND `realized_vol_pct_60 <= 40`
+- `trending_high_vol` : `adx_14 >= 25` AND `realized_vol_pct_60 > 40`
+- `ranging_low_vol`   : `adx_14 < 25`  AND `realized_vol_pct_60 <= 40`
+- `ranging_high_vol`  : `adx_14 < 25`  AND `realized_vol_pct_60 > 40`
 
 Confidence is the minimum of two normalized distances to the
 thresholds; undefined when either input is NaN.
@@ -25,7 +27,8 @@ from services.trader.regime.base import (
 )
 
 _ADX_THRESHOLD = 25.0
-_VOL_THRESHOLD = 0.40
+# realized_vol_pct_60 is on the 0-100 percentile scale (see features/volatility.py).
+_VOL_THRESHOLD = 40.0
 
 
 class MesoLens(Lens):

@@ -33,7 +33,7 @@ class _FakeHindsight(HindsightClient):
 def _rising_vol_negative_flip() -> pd.Series:
     return pd.Series(
         {
-            "realized_vol_pct_60": 0.92,  # high realized-vol percentile
+            "realized_vol_pct_60": 92.0,  # high realized-vol percentile (0-100 scale)
             "sentiment_score": -0.6,  # flipped negative
         }
     )
@@ -42,7 +42,7 @@ def _rising_vol_negative_flip() -> pd.Series:
 def _stable_trending() -> pd.Series:
     return pd.Series(
         {
-            "realized_vol_pct_60": 0.20,  # calm
+            "realized_vol_pct_60": 20.0,  # calm (0-100 scale)
             "sentiment_score": 0.35,  # steady positive
         }
     )

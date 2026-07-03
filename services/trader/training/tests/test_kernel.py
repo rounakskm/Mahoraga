@@ -162,8 +162,8 @@ def test_fitness_rewards_quarterly_consistency_and_resilience():
 def test_regimes_for_applies_candidate_thresholds():
     idx = pd.bdate_range("2020-01-01", periods=6)
     adx = pd.Series([30.0, 30.0, 10.0, 10.0, 30.0, np.nan], index=idx)
-    vol = pd.Series([50.0, 0.1, 50.0, 0.1, 50.0, 50.0], index=idx)  # 0.1<=.40 low, 50>.40 high
-    s = RegimeConditionalStrategy.seed()  # adx_t=25, vol_t=0.40
+    vol = pd.Series([50.0, 0.1, 50.0, 0.1, 50.0, 50.0], index=idx)  # 0.1<=40 low, 50>40 high
+    s = RegimeConditionalStrategy.seed()  # adx_t=25, vol_t=40.0 (0-100 scale)
     assert list(s.regimes_for(adx, vol)) == [
         "trending_high_vol", "trending_low_vol", "ranging_high_vol",
         "ranging_low_vol", "trending_high_vol", "undefined",

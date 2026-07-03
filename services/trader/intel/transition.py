@@ -7,8 +7,8 @@ which label. Two layers:
   `feature_row`. Rising realized volatility (`realized_vol_pct_60` high) combined with a
   sentiment flip to negative (`sentiment_score < 0`) reads as regime instability → an
   elevated probability toward a high-vol / shock label. A calm, persistent, same-label
-  trending history with steady sentiment reads as stable → a low probability of staying
-  put. Thresholds below are first-pass and tunable.
+  trending history with steady sentiment reads as stable → a low probability of leaving
+  the current regime. Thresholds below are first-pass and tunable.
 
 - **Hunter-learned overlay:** when a `HindsightClient` is enabled, `recall` a learned
   transition prior keyed on `from_label` and blend it with the rules probability (simple
@@ -31,8 +31,8 @@ from services.trader.training.hindsight_client import HindsightClient
 
 # --- rules thresholds (first-pass, tunable) --------------------------------
 
-# realized_vol_pct_60 is a percentile in [0, 1]; at/above this reads as "high vol".
-_VOL_HIGH_PCT = 0.75
+# realized_vol_pct_60 is a percentile in [0, 100]; at/above this reads as "high vol".
+_VOL_HIGH_PCT = 75.0
 # sentiment_score ∈ [-1, 1]; strictly below this counts as a negative flip.
 _SENTIMENT_NEGATIVE = 0.0
 # Elevated probability assigned when instability is detected (high vol + neg flip).
