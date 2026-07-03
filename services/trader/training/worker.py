@@ -19,6 +19,7 @@ import pandas as pd
 
 from services.trader.training.eval import evaluate
 from services.trader.training.parse_metric import FitnessReport, report_from_eval
+from services.trader.training.roles import strategy_params
 from services.trader.training.strategy_template import RegimeConditionalStrategy
 
 
@@ -42,7 +43,10 @@ def run_in_worktree(
     )
     try:
         ev = evaluate(candidate, price, regimes)
-        return report_from_eval(ev, candidate.windows)
+        # Full mutation surface (windows + detector thresholds) — a thresholds-only
+        # mutation must yield a distinct candidate_hash (same surface the
+        # orchestrator hashes).
+        return report_from_eval(ev, strategy_params(candidate))
     finally:
         subprocess.run(
             ["git", "worktree", "remove", "--force", str(path)],

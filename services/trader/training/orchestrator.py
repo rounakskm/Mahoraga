@@ -2,12 +2,15 @@
 
 Headless Python realization of the seven-role amendment §4 dispatch surface:
 
+    (refresh_master -> starting strategy, seed() fallback)
     Planner.propose_queue
       for each hypothesis:
         halt.is_halted()        -> stop, halted=True
         Reviewer.check          -> blocked? reviewed_out++, do-not-repeat, continue
         (Hunter) eval.evaluate  -> FitnessReport
-        Guardian.review         -> vetoed? vetoed++, (catastrophic -> halt+break), continue
+        Guardian.review         -> vetoed? vetoed++, RECORD the iteration
+                                   (promote_pipeline + notebook) + do-not-repeat,
+                                   (catastrophic -> halt+break), continue
         promote_pipeline / count-as-recorded   recorded++ (+promoted++ if promoted)
         Archivist: notebook.record + hindsight.retain
 
@@ -34,6 +37,7 @@ defs call this Orchestrator from the substrate side.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import pandas as pd
@@ -43,6 +47,7 @@ from services.trader.training import eval as kernel_eval
 from services.trader.training.parse_metric import FitnessReport, report_from_eval
 from services.trader.training.promote import promote_pipeline
 from services.trader.training.provenance import candidate_hash
+from services.trader.training.refresh_master import refresh_master
 from services.trader.training.roles import (
     Guardian,
     Planner,
@@ -50,6 +55,32 @@ from services.trader.training.roles import (
     strategy_params,
 )
 from services.trader.training.strategy_template import RegimeConditionalStrategy
+
+logger = logging.getLogger(__name__)
+
+_REGIME_KEYS = (
+    "trending_low_vol",
+    "trending_high_vol",
+    "ranging_low_vol",
+    "ranging_high_vol",
+)
+
+
+def _strategy_from_params(params: dict) -> RegimeConditionalStrategy:
+    """Reconstruct a strategy from registry params. Accepts both shapes the
+    registry has stored: nested (`{"windows": {...}, "adx_threshold": ...}`, the
+    run_autoresearch artifact shape) and flat (`strategy_params`-style: the 4
+    regime keys + thresholds at the top level)."""
+    raw = params.get("windows") or {k: params[k] for k in _REGIME_KEYS if k in params}
+    if not raw:
+        raise ValueError(f"no regime windows in master params: {sorted(params)}")
+    windows = {k: int(v) for k, v in raw.items()}
+    kwargs: dict = {}
+    if "adx_threshold" in params:
+        kwargs["adx_threshold"] = float(params["adx_threshold"])
+    if "vol_threshold" in params:
+        kwargs["vol_threshold"] = float(params["vol_threshold"])
+    return RegimeConditionalStrategy(windows, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -107,8 +138,9 @@ class Orchestrator:
         or when Guardian trips its catastrophic-drawdown halt; both return a summary
         with `halted=True`.
         """
-        current = RegimeConditionalStrategy.seed()
+        current = self._starting_strategy()
         proposed = reviewed_out = vetoed = recorded = promoted = 0
+        iteration_idx = 0  # every persisted row (recorded OR vetoed) gets its own
         halted = False
         recent_hashes: set[str] = set()
 
@@ -128,9 +160,10 @@ class Orchestrator:
             decision = self.reviewer.check(hypothesis, current, recent_hashes)
             recent_hashes.add(h)
             if not decision.approved:
+                # Pre-eval rejection: no FitnessReport to record, but the
+                # do-not-repeat loop still closes (notebook + Hindsight fact).
                 reviewed_out += 1
-                if self.notebook is not None:
-                    self.notebook.mark_do_not_repeat(h, decision.reason)
+                self._mark_do_not_repeat(h, decision.reason, cadence)
                 continue
 
             # Hunter step (in-process eval — see module ponytail note).
@@ -139,26 +172,24 @@ class Orchestrator:
 
             verdict = self.guardian.review(report)
             if not verdict.approved:
+                # A discarded candidate is still evidence: record the iteration
+                # (Postgres + notebook) AND close the do-not-repeat loop.
                 vetoed += 1
+                self._persist(report, iteration_idx)
+                iteration_idx += 1
+                self._mark_do_not_repeat(h, verdict.reason, cadence)
                 if verdict.halt:
                     self.halt.halt(verdict.reason)
                     halted = True
                     break
                 continue
 
-            # promote: real Postgres compare-and-set when a DSN is set; otherwise the
-            # iteration is still counted as recorded (the summary tallies in-memory).
-            if self.dsn is not None:
-                result = promote_pipeline(self.dsn, self.run_id, recorded, report)
-                if result.promoted:
-                    promoted += 1
-            elif report.promoted:
+            if self._persist(report, iteration_idx):
                 promoted += 1
+            iteration_idx += 1
             recorded += 1
 
-            # Archivist: notebook + Hindsight (both optional / graceful-offline).
-            if self.notebook is not None:
-                self.notebook.record(report, self.run_id, recorded - 1)
+            # Archivist: Hindsight Experience Fact (optional / graceful-offline).
             if self.hindsight is not None:
                 self.hindsight.retain(
                     f"iteration {h}: fitness={report.fitness:.4f} "
@@ -175,3 +206,54 @@ class Orchestrator:
             promoted=promoted,
             halted=halted,
         )
+
+    # --- helpers -------------------------------------------------------------
+
+    def _starting_strategy(self) -> RegimeConditionalStrategy:
+        """The promoted master from the registry when a DSN is set (so a cadence
+        continues from the deployment-best, not from scratch); `seed()` when there
+        is no DSN, no master yet, or the refresh fails (graceful-offline)."""
+        if self.dsn is not None:
+            try:
+                params = refresh_master(self.dsn)
+                if params:
+                    return _strategy_from_params(params)
+            except Exception as exc:
+                logger.warning("refresh_master failed; starting from seed(): %s", exc)
+        return RegimeConditionalStrategy.seed()
+
+    def _persist(self, report: FitnessReport, iteration: int) -> bool:
+        """Record one evaluated candidate: Postgres promote_pipeline (when a DSN
+        is set) + notebook. Returns whether the candidate was promoted.
+
+        A provenance-write failure (Postgres down, exhausted serialization
+        retries) degrades gracefully: the iteration stays counted in-memory, the
+        failure is logged, and the cadence never crashes.
+        """
+        promoted = False
+        if self.dsn is not None:
+            try:
+                result = promote_pipeline(self.dsn, self.run_id, iteration, report)
+                promoted = result.promoted
+            except Exception as exc:
+                logger.warning(
+                    "provenance write failed (iteration recorded in-memory only): %s",
+                    exc,
+                )
+        elif report.promoted:
+            promoted = True
+        if self.notebook is not None:
+            self.notebook.record(report, self.run_id, iteration)
+        return promoted
+
+    def _mark_do_not_repeat(self, h: str, reason: str, cadence: str) -> None:
+        """Close the do-not-repeat loop for a rejected/vetoed candidate: notebook
+        entry + a Hindsight fact the Planner's `_forbidden_hashes` recall matches
+        (text starts with "do-not-repeat"; `candidate_hash` in the metadata)."""
+        if self.notebook is not None:
+            self.notebook.mark_do_not_repeat(h, reason)
+        if self.hindsight is not None:
+            self.hindsight.retain(
+                f"do-not-repeat {h}: {reason}",
+                {"candidate_hash": h, "run_id": self.run_id, "cadence": cadence},
+            )

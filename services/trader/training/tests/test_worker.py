@@ -39,6 +39,25 @@ def test_run_in_worktree_returns_report_and_cleans_up(tmp_path):
     assert not (base / "exp-a").exists()  # worktree removed
 
 
+def test_hash_surface_includes_detector_thresholds():
+    # Two candidates differing ONLY in adx_threshold must produce distinct
+    # report.candidate_hash via the worker's report path (same surface, no
+    # worktree needed: report_from_eval + strategy_params directly).
+    from dataclasses import replace
+
+    from services.trader.training.eval import evaluate
+    from services.trader.training.parse_metric import report_from_eval
+    from services.trader.training.roles import strategy_params
+
+    p = _price()
+    r = label_regimes(p)
+    a = RegimeConditionalStrategy.seed()
+    b = replace(a, adx_threshold=a.adx_threshold + 2.0)
+    report_a = report_from_eval(evaluate(a, p, r), strategy_params(a))
+    report_b = report_from_eval(evaluate(b, p, r), strategy_params(b))
+    assert report_a.candidate_hash != report_b.candidate_hash
+
+
 def test_two_experiments_never_collide(tmp_path):
     p = _price()
     r = label_regimes(p)

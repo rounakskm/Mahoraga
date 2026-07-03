@@ -57,15 +57,21 @@ def strategy_params(s: RegimeConditionalStrategy) -> dict:
 
 
 def _forbidden_hashes(hindsight, regime_label: str, k: int) -> set[str]:
-    """Candidate hashes Hindsight has already filed under `do-not-repeat`."""
+    """Candidate hashes Hindsight has already filed under `do-not-repeat`.
+
+    The real recall API returns the hash inside each result's `metadata` dict;
+    the top-level key is kept for older facts / test fakes."""
     if hindsight is None or not hindsight.is_enabled():
         return set()
     results = hindsight.recall(f"do-not-repeat {regime_label}", k=k)
-    return {
-        r["candidate_hash"]
-        for r in results
-        if isinstance(r, dict) and "candidate_hash" in r
-    }
+    hashes: set[str] = set()
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        h = r.get("candidate_hash") or (r.get("metadata") or {}).get("candidate_hash")
+        if h:
+            hashes.add(h)
+    return hashes
 
 
 class Planner:

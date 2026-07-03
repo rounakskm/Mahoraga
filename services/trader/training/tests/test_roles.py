@@ -37,11 +37,15 @@ def _report(**kw) -> FitnessReport:
 class _FakeHindsight(HindsightClient):
     """Recall returns one forbidden candidate_hash; never touches the network."""
 
-    def __init__(self, forbidden: str) -> None:
-        super().__init__(base_url="http://stub")  # enabled, but _post/_get unused
+    def __init__(self, forbidden: str, *, nested: bool = False) -> None:
+        super().__init__(base_url="http://stub")  # enabled, but _post unused
         self._forbidden = forbidden
+        self._nested = nested
 
     def recall(self, query: str, k: int = 5) -> list[dict]:
+        if self._nested:  # the real recall API shape: hash inside `metadata`
+            return [{"id": "f1", "text": f"do-not-repeat {self._forbidden}: dup",
+                     "metadata": {"candidate_hash": self._forbidden}}]
         return [{"candidate_hash": self._forbidden}]
 
 
@@ -68,6 +72,19 @@ def test_planner_drops_a_do_not_repeat_hash():
     assert len(queue) == 3
     out = {candidate_hash(strategy_params(c)) for c in queue}
     assert forbidden not in out  # the forbidden hash never appears
+
+
+def test_planner_drops_a_metadata_nested_do_not_repeat_hash():
+    # The real Hindsight recall returns user metadata NESTED under `metadata`;
+    # the Planner must still drop the forbidden candidate.
+    current = RegimeConditionalStrategy.seed()
+    first = Planner().propose_queue(current, "x", n=1, seed=7)[0]
+    forbidden = candidate_hash(strategy_params(first))
+    planner = Planner(hindsight=_FakeHindsight(forbidden, nested=True))
+    queue = planner.propose_queue(current, "x", n=3, seed=7)
+    assert len(queue) == 3
+    out = {candidate_hash(strategy_params(c)) for c in queue}
+    assert forbidden not in out
 
 
 # --- Reviewer --------------------------------------------------------------

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import itertools
 import json
 import os
 import time
@@ -86,10 +87,16 @@ def run_fleet(args: argparse.Namespace) -> int:
     print(f"hindsight: {mem} | provenance: {pg}\n")
 
     if args.cadence == "replay":
+        step_counter = itertools.count()
+
         def run_fn(step):
+            # Each replay step gets its own run_id suffix so iteration rows from
+            # different PIT windows never collide on (run_id, iteration).
+            i = next(step_counter)
             orch = Orchestrator(
                 step.train_price, step.train_regimes,
-                dsn=dsn, run_id=run_id, hindsight=hindsight, notebook=notebook,
+                dsn=dsn, run_id=f"{run_id}-step{i}", hindsight=hindsight,
+                notebook=notebook,
             )
             summary = orch.run_cadence("replay", iterations=args.iterations, seed=args.seed)
             print(f"  replay asof {step.asof.date()} ({len(step.train_price)} bars): "

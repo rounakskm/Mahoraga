@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
-from services.trader.training.replay import ReplayClock, replay_campaign
+from services.trader.training.replay import ReplayClock, ReplayStep, replay_campaign
 from services.trader.training.strategy_template import label_regimes
 
 
@@ -29,21 +30,31 @@ def test_clock_never_leaks_future_or_vault():
 
 
 def test_leak_canary_trips_if_slice_exceeds_asof():
-    # a hand-built bad step must be caught by the same assertion the clock guarantees
+    # a deliberately-bad step (slice extends PAST asof) must be rejected at
+    # construction — the PIT invariant lives in ReplayStep itself, not the tests.
     p = _price(500)
-    s = next(
-        iter(
-            ReplayClock(
-                p,
-                label_regimes(p),
-                start=p.index[250],
-                vault_cutoff=p.index[-1],
-                step_days=63,
-            )
-        )
+    r = label_regimes(p)
+    asof = p.index[250]
+    with pytest.raises(ValueError, match="PIT"):
+        ReplayStep(asof=asof, train_price=p, train_regimes=r[r.index <= asof])
+
+
+def test_leak_canary_trips_on_future_regimes():
+    p = _price(500)
+    r = label_regimes(p)
+    asof = p.index[250]
+    with pytest.raises(ValueError, match="PIT"):
+        ReplayStep(asof=asof, train_price=p[p.index <= asof], train_regimes=r)
+
+
+def test_good_step_constructs_cleanly():
+    p = _price(500)
+    r = label_regimes(p)
+    asof = p.index[250]
+    s = ReplayStep(
+        asof=asof, train_price=p[p.index <= asof], train_regimes=r[r.index <= asof]
     )
-    bad = s.train_price.index.max()
-    assert bad <= s.asof
+    assert s.train_price.index.max() <= s.asof
 
 
 def test_replay_campaign_runs_fn_per_step():

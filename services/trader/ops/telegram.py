@@ -31,10 +31,14 @@ class TelegramOps:
         halt: HaltControl,
         reporter: Reporter,
         token: str | None = None,
+        allowed_chat_ids: set[str] | None = None,
     ) -> None:
         self.halt = halt
         self.reporter = reporter
         self.token = token
+        # None -> open (offline/test path); a set -> only those chat ids may
+        # drive the kill-switch. Unknown chats are silently ignored (no reply).
+        self.allowed_chat_ids = allowed_chat_ids
 
     def handle(self, command: str) -> str:
         """Route a raw command line to the halt control / reporter; return reply."""
@@ -54,31 +58,47 @@ class TelegramOps:
             return self.reporter.status().render()
         return _HELP
 
+    def _should_act(self, update: dict) -> bool:
+        """True when this poll update carries a text command from an allowed chat."""
+        message = update.get("message", {})
+        text = message.get("text")
+        chat_id = message.get("chat", {}).get("id")
+        if not text or chat_id is None:
+            return False
+        return self.allowed_chat_ids is None or str(chat_id) in self.allowed_chat_ids
+
+    def _poll_once(self, client, base: str, offset: int) -> int:
+        """One getUpdates round-trip; returns the next offset."""
+        resp = client.get(
+            f"{base}/getUpdates",
+            params={"offset": offset, "timeout": 30},
+        )
+        resp.raise_for_status()
+        for update in resp.json().get("result", []):
+            offset = update["update_id"] + 1
+            if not self._should_act(update):
+                continue  # unauthorized / non-text: ignore, reply nothing
+            message = update["message"]
+            reply = self.handle(message["text"])
+            client.post(
+                f"{base}/sendMessage",
+                json={"chat_id": message["chat"]["id"], "text": reply},
+            )
+        return offset
+
     def poll(self) -> None:
         """Long-poll Telegram for commands. Requires a token (no offline path)."""
         if not self.token:
             raise RuntimeError("no token")
+        import time  # noqa: PLC0415
+
         import httpx  # noqa: PLC0415 (lazy: only the real path needs the network)
 
         base = f"{_TELEGRAM_API}/bot{self.token}"
         offset = 0
         with httpx.Client(timeout=35.0) as client:
             while True:
-                resp = client.get(
-                    f"{base}/getUpdates",
-                    params={"offset": offset, "timeout": 30},
-                )
-                resp.raise_for_status()
-                for update in resp.json().get("result", []):
-                    offset = update["update_id"] + 1
-                    message = update.get("message", {})
-                    text = message.get("text")
-                    chat = message.get("chat", {})
-                    chat_id = chat.get("id")
-                    if not text or chat_id is None:
-                        continue
-                    reply = self.handle(text)
-                    client.post(
-                        f"{base}/sendMessage",
-                        json={"chat_id": chat_id, "text": reply},
-                    )
+                try:
+                    offset = self._poll_once(client, base, offset)
+                except Exception:  # transient HTTP error must not kill the loop
+                    time.sleep(2.0)
