@@ -286,3 +286,223 @@ def test_hindsight_retains_on_submit(tmp_path) -> None:
 def test_order_type_is_market_default() -> None:
     """Sanity: sized orders are MARKET (sizing.size_order contract)."""
     assert OrderType.MARKET == "MARKET"
+
+
+# ---------------------------------------------------------------------------
+# C3 — recent trades are fetched once per cycle and handed to compliance.
+# ---------------------------------------------------------------------------
+
+
+def test_recent_trades_feed_compliance_wash_sale_rejects(tmp_path) -> None:
+    """A wash-sale-triggering history from the recent_trades provider must reject
+    the re-buy through the REAL ComplianceEngine — broker never called."""
+    from services.trader.execution.compliance import ComplianceEngine, TradeRecord
+
+    now = pd.Timestamp("2026-07-01T15:00:00Z")
+    history = [
+        TradeRecord(
+            ticker="SPY",
+            side=Side.SELL,
+            ts=now - pd.Timedelta(days=5),
+            realized_pl=-120.0,  # loss-closing sale 5 days ago
+            is_day_trade=False,
+        )
+    ]
+    calls: list[int] = []
+
+    def _provider() -> list[TradeRecord]:
+        calls.append(1)
+        return history
+
+    broker = _StubBroker()
+    halt = HaltControl(tmp_path / "halt.flag")
+    ex = Executor(
+        broker,
+        _StubFirewall(allow=True),
+        ComplianceEngine(),
+        halt,
+        recent_trades=_provider,
+    )
+
+    report = ex.run_cycle([_intent("SPY")], _portfolio(), {"SPY": 500.0}, _ctx_for)
+
+    assert broker.calls == []
+    assert report.submitted == 0
+    assert report.rejected == 1
+    assert any("wash-sale" in r for r in report.rejections)
+    assert len(calls) == 1  # fetched exactly once per cycle
+
+
+def test_recent_trades_fetched_once_for_many_intents(tmp_path) -> None:
+    calls: list[int] = []
+
+    def _provider() -> list:
+        calls.append(1)
+        return []
+
+    broker = _StubBroker()
+    halt = HaltControl(tmp_path / "halt.flag")
+    ex = Executor(
+        broker,
+        _StubFirewall(allow=True),
+        _StubCompliance(allow=True),
+        halt,
+        recent_trades=_provider,
+    )
+    ex.run_cycle(
+        [_intent("SPY"), _intent("QQQ")],
+        _portfolio(),
+        {"SPY": 500.0, "QQQ": 400.0},
+        _ctx_for,
+    )
+    assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# C9 — per-intent error containment + broker-REJECTED status accounting.
+# ---------------------------------------------------------------------------
+
+
+def test_broker_error_counts_error_and_continues(tmp_path) -> None:
+    """A broker exception on one intent must not lose the report or skip the next."""
+
+    class _FlakyBroker(_StubBroker):
+        def submit_order(self, order: Order, *, dry_run: bool = True) -> Order:
+            if order.ticker == "BOOM":
+                raise RuntimeError("HTTP 502 from Alpaca")
+            return super().submit_order(order, dry_run=dry_run)
+
+    broker = _FlakyBroker()
+    halt = HaltControl(tmp_path / "halt.flag")
+    ex = Executor(broker, _StubFirewall(allow=True), _StubCompliance(allow=True), halt)
+
+    report = ex.run_cycle(
+        [_intent("BOOM"), _intent("SPY")],
+        _portfolio(),
+        {"BOOM": 500.0, "SPY": 500.0},
+        _ctx_for,
+    )
+
+    assert report.errors == 1
+    assert report.submitted == 1  # SPY still processed after the BOOM error
+    assert report.rejected == 0
+    assert [c["order"].ticker for c in broker.calls] == ["BOOM", "SPY"] or [
+        c["order"].ticker for c in broker.calls
+    ] == ["SPY"]
+
+
+def test_broker_rejected_status_counts_rejected_not_submitted(tmp_path) -> None:
+    class _RejectingBroker(_StubBroker):
+        def submit_order(self, order: Order, *, dry_run: bool = True) -> Order:
+            self.calls.append({"order": order, "dry_run": dry_run})
+            return Order(
+                id="rej-1",
+                ticker=order.ticker,
+                side=order.side,
+                qty=order.qty,
+                order_type=order.order_type,
+                limit_price=order.limit_price,
+                stop_price=order.stop_price,
+                status=OrderStatus.REJECTED,
+            )
+
+    broker = _RejectingBroker()
+    halt = HaltControl(tmp_path / "halt.flag")
+    ex = Executor(broker, _StubFirewall(allow=True), _StubCompliance(allow=True), halt)
+
+    report = ex.run_cycle([_intent("SPY")], _portfolio(), {"SPY": 500.0}, _ctx_for)
+
+    assert report.submitted == 0
+    assert report.rejected == 1
+    assert report.errors == 0
+    assert any("REJECTED" in r for r in report.rejections)
+
+
+def test_retain_error_never_affects_accounting(tmp_path) -> None:
+    """A Hindsight retain blow-up is logged and ignored — the submit still counts."""
+
+    class _ExplodingHindsight:
+        def is_enabled(self) -> bool:
+            return True
+
+        def retain(self, text, metadata=None):  # noqa: ANN001, ANN201
+            raise RuntimeError("hindsight sidecar down")
+
+    broker = _StubBroker()
+    halt = HaltControl(tmp_path / "halt.flag")
+    ex = Executor(
+        broker,
+        _StubFirewall(allow=True),
+        _StubCompliance(allow=True),
+        halt,
+        hindsight=_ExplodingHindsight(),
+    )
+
+    report = ex.run_cycle([_intent("SPY")], _portfolio(), {"SPY": 500.0}, _ctx_for)
+
+    assert report.submitted == 1
+    assert report.errors == 0
+    assert len(broker.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# C10 — live_orders is read-only after construction.
+# ---------------------------------------------------------------------------
+
+
+def test_live_orders_is_read_only(tmp_path) -> None:
+    import pytest
+
+    broker = _StubBroker()
+    halt = HaltControl(tmp_path / "halt.flag")
+    ex = Executor(broker, _StubFirewall(allow=True), _StubCompliance(allow=True), halt)
+
+    assert ex.live_orders is False
+    with pytest.raises(AttributeError):
+        ex.live_orders = True  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# C7 — on_submit hook (trade-store recording seam): called with the RETURNED
+# order, and contained if it blows up.
+# ---------------------------------------------------------------------------
+
+
+def test_on_submit_called_with_returned_order(tmp_path) -> None:
+    broker = _StubBroker()
+    halt = HaltControl(tmp_path / "halt.flag")
+    seen: list[tuple[OrderIntent, Order]] = []
+
+    ex = Executor(
+        broker,
+        _StubFirewall(allow=True),
+        _StubCompliance(allow=True),
+        halt,
+        on_submit=lambda intent, order: seen.append((intent, order)),
+    )
+    report = ex.run_cycle([_intent("SPY")], _portfolio(), {"SPY": 500.0}, _ctx_for)
+
+    assert report.submitted == 1
+    assert len(seen) == 1
+    intent, returned = seen[0]
+    assert intent.ticker == "SPY"
+    assert returned.id == "sim-SPY"  # the broker's RETURNED order, not the input
+
+
+def test_on_submit_error_contained(tmp_path) -> None:
+    def _boom(intent: OrderIntent, order: Order) -> None:
+        raise RuntimeError("trade store down")
+
+    broker = _StubBroker()
+    halt = HaltControl(tmp_path / "halt.flag")
+    ex = Executor(
+        broker,
+        _StubFirewall(allow=True),
+        _StubCompliance(allow=True),
+        halt,
+        on_submit=_boom,
+    )
+    report = ex.run_cycle([_intent("SPY")], _portfolio(), {"SPY": 500.0}, _ctx_for)
+
+    assert report.submitted == 1
+    assert report.errors == 0

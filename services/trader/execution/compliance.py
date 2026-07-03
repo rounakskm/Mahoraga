@@ -23,6 +23,19 @@ from pandas.tseries.offsets import BDay
 from services.trader.execution.model import OrderIntent, Portfolio, Side
 
 
+def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """Normalize to tz-aware UTC; a naive timestamp is treated as UTC.
+
+    Trade history comes from heterogeneous sources (Postgres, brokers, tests);
+    mixing naive and aware timestamps in a comparison raises in pandas, and
+    silently mis-windowing a wash-sale/PDT check is worse. One normalization
+    point keeps every comparison well-defined.
+    """
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
+
+
 @dataclass(frozen=True)
 class ComplianceVerdict:
     """Outcome of a compliance check — allowed plus the list of violations."""
@@ -65,6 +78,7 @@ class ComplianceEngine:
         now: pd.Timestamp,
     ) -> ComplianceVerdict:
         """Return a verdict collecting every compliance violation found."""
+        now = _as_utc(now)
         rejections: list[str] = []
 
         pdt = self._pdt_violation(intent, portfolio, recent_trades, now)
@@ -100,7 +114,7 @@ class ComplianceEngine:
         recent_day_trades = sum(
             1
             for t in recent_trades
-            if t.is_day_trade and window_start <= t.ts <= now
+            if t.is_day_trade and window_start <= _as_utc(t.ts) <= now
         )
         if recent_day_trades >= 3:
             return (
@@ -137,7 +151,7 @@ class ComplianceEngine:
                 t.side == Side.SELL
                 and t.realized_pl < 0
                 and t.ticker in watched
-                and window_start <= t.ts <= now
+                and window_start <= _as_utc(t.ts) <= now
             ):
                 return (
                     f"wash-sale: re-buy of {intent.ticker} within "

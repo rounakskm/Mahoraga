@@ -12,6 +12,7 @@ from services.trader.execution.model import (
     OrderStatus,
     OrderType,
     Portfolio,
+    Side,
 )
 
 
@@ -31,7 +32,20 @@ def size_order(
     notional / price, floored toward zero to whole shares when `allow_fractional`
     is False. Returns `None` when price or equity is non-positive, or when the
     resulting notional falls below `min_notional`.
+
+    Raises:
+        ValueError: on a side/weight sign mismatch (BUY with a negative
+            target_weight or SELL with a positive one) — a malformed intent
+            must fail loudly, not silently size into the wrong direction.
     """
+    if (intent.side is Side.BUY and intent.target_weight < 0) or (
+        intent.side is Side.SELL and intent.target_weight > 0
+    ):
+        raise ValueError(
+            f"side/weight sign mismatch: {intent.side} {intent.ticker} with "
+            f"target_weight {intent.target_weight}"
+        )
+
     if price <= 0 or portfolio.equity <= 0:
         return None
 

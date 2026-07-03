@@ -161,3 +161,108 @@ def test_cancel_order_calls_delete() -> None:
 def test_cancel_order_disabled_returns_false() -> None:
     client = AlpacaBrokerClient(None, None)
     assert client.cancel_order("abc-123") is False
+
+
+# ---------------------------------------------------------------------------
+# C6 — entry-with-stop becomes an Alpaca OTO order (nested stop_loss), and a
+# bare `stop_price` NEVER rides on a market/limit order body.
+# ---------------------------------------------------------------------------
+
+
+def _market_order(side: Side, stop: float | None) -> Order:
+    return Order(
+        id=None,
+        ticker="SPY",
+        side=side,
+        qty=10,
+        order_type=OrderType.MARKET,
+        limit_price=None,
+        stop_price=stop,
+        status=OrderStatus.NEW,
+    )
+
+
+def test_buy_entry_with_stop_emits_oto_bracket() -> None:
+    body = AlpacaBrokerClient._order_to_body(_market_order(Side.BUY, stop=96.0))
+    assert body["order_class"] == "oto"
+    assert body["stop_loss"] == {"stop_price": "96.0"}
+    assert "stop_price" not in body  # never a bare stop on a market order
+    assert body["type"] == "market"
+
+
+def test_sell_with_stop_never_gets_bare_stop_price() -> None:
+    body = AlpacaBrokerClient._order_to_body(_market_order(Side.SELL, stop=104.0))
+    assert "stop_price" not in body
+    assert "order_class" not in body
+
+
+def test_no_stop_no_bracket_fields() -> None:
+    body = AlpacaBrokerClient._order_to_body(_market_order(Side.BUY, stop=None))
+    assert "stop_price" not in body
+    assert "order_class" not in body
+    assert "stop_loss" not in body
+
+
+# ---------------------------------------------------------------------------
+# C10 — extended status map + unknown-status fallback.
+# ---------------------------------------------------------------------------
+
+
+def _order_payload(status: str) -> dict:
+    return {
+        "id": "x-1",
+        "symbol": "SPY",
+        "side": "buy",
+        "qty": "10",
+        "type": "market",
+        "status": status,
+        "filled_qty": "0",
+    }
+
+
+@pytest.mark.parametrize(
+    ("alpaca_status", "expected"),
+    [
+        ("done_for_day", OrderStatus.CANCELED),
+        ("stopped", OrderStatus.FILLED),
+        ("pending_cancel", OrderStatus.CANCELED),
+        ("replaced", OrderStatus.CANCELED),
+        ("held", OrderStatus.SUBMITTED),
+        ("suspended", OrderStatus.SUBMITTED),
+    ],
+)
+def test_extended_status_map(alpaca_status: str, expected: OrderStatus) -> None:
+    order = AlpacaBrokerClient._map_order(_order_payload(alpaca_status))
+    assert order.status is expected
+
+
+def test_unknown_status_falls_back_to_new() -> None:
+    order = AlpacaBrokerClient._map_order(_order_payload("totally_new_alpaca_state"))
+    assert order.status is OrderStatus.NEW
+
+
+# ---------------------------------------------------------------------------
+# C2 — daily_pl_pct from /account equity vs last_equity.
+# ---------------------------------------------------------------------------
+
+
+def test_daily_pl_pct_from_account() -> None:
+    client = AlpacaBrokerClient(key="k", secret="s")
+    client._get = lambda path: {  # type: ignore[method-assign]
+        "equity": "99000",
+        "last_equity": "100000",
+        "cash": "1000",
+        "buying_power": "1000",
+    }
+    pl = client.daily_pl_pct()
+    assert pl == pytest.approx(-0.01)
+
+
+def test_daily_pl_pct_none_when_disabled() -> None:
+    assert AlpacaBrokerClient(None, None).daily_pl_pct() is None
+
+
+def test_daily_pl_pct_none_when_last_equity_invalid() -> None:
+    client = AlpacaBrokerClient(key="k", secret="s")
+    client._get = lambda path: {"equity": "99000", "last_equity": "0"}  # type: ignore[method-assign]
+    assert client.daily_pl_pct() is None
