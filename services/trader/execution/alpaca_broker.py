@@ -52,6 +52,15 @@ _STATUS_FROM_ALPACA = {
     "cancelled": OrderStatus.CANCELED,
     "expired": OrderStatus.CANCELED,
     "rejected": OrderStatus.REJECTED,
+    # Extended lifecycle states (C10) bucketed by their practical meaning:
+    "done_for_day": OrderStatus.CANCELED,    # no longer working today
+    "stopped": OrderStatus.FILLED,           # execution guaranteed by the venue
+    "pending_cancel": OrderStatus.CANCELED,  # on its way out
+    "replaced": OrderStatus.CANCELED,        # superseded by a new order
+    "pending_replace": OrderStatus.SUBMITTED,
+    "held": OrderStatus.SUBMITTED,           # e.g. an OTO stop leg awaiting trigger
+    "suspended": OrderStatus.SUBMITTED,      # accepted but not currently workable
+    "calculated": OrderStatus.FILLED,        # done, settlement figures pending
 }
 
 
@@ -159,7 +168,11 @@ class AlpacaBrokerClient:
         raw_type = raw.get("order_type") or raw.get("type") or "market"
         order_type = OrderType.LIMIT if str(raw_type).lower() == "limit" else OrderType.MARKET
         side = Side.SELL if str(raw["side"]).lower() == "sell" else Side.BUY
-        status = _STATUS_FROM_ALPACA.get(str(raw["status"]).lower(), OrderStatus.NEW)
+        raw_status = str(raw["status"]).lower()
+        status = _STATUS_FROM_ALPACA.get(raw_status)
+        if status is None:
+            logger.debug("unknown Alpaca order status %r — mapping to NEW", raw_status)
+            status = OrderStatus.NEW
         limit_price = raw.get("limit_price")
         stop_price = raw.get("stop_price")
         filled_avg = raw.get("filled_avg_price")
@@ -178,7 +191,19 @@ class AlpacaBrokerClient:
 
     @staticmethod
     def _order_to_body(order: Order) -> dict:
-        """Build the Alpaca /orders POST body from an Order."""
+        """Build the Alpaca /orders POST body from an Order.
+
+        C6 — real stops via OTO (one-triggers-other): a BUY entry carrying a
+        `stop_price` becomes `order_class="oto"` with a nested `stop_loss` leg,
+        so the protective stop rests at the venue the moment the entry fills.
+        (OTO, not `bracket`: Alpaca's bracket class requires a take_profit leg
+        we do not use; OTO needs only the stop_loss.)
+
+        A bare top-level `stop_price` NEVER rides on a market/limit order — on
+        Alpaca that field turns the order itself into a stop/stop-limit trigger
+        order, which is not what an entry-with-protective-stop means. A SELL
+        (exit/short) with a stop attached simply drops it from the body.
+        """
         body: dict[str, object] = {
             "symbol": order.ticker,
             "qty": str(order.qty),
@@ -188,9 +213,28 @@ class AlpacaBrokerClient:
         }
         if order.limit_price is not None:
             body["limit_price"] = str(order.limit_price)
-        if order.stop_price is not None:
-            body["stop_price"] = str(order.stop_price)
+        if order.stop_price is not None and order.side is Side.BUY:
+            body["order_class"] = "oto"
+            body["stop_loss"] = {"stop_price": str(order.stop_price)}
         return body
+
+    def daily_pl_pct(self) -> float | None:
+        """Today's realized+unrealized P&L pct: (equity - last_equity) / last_equity.
+
+        Alpaca's `/account` exposes `equity` (now) and `last_equity` (previous
+        trading day's close). Returns None when the client is disabled or
+        `last_equity` is missing/non-positive — the caller (context factory)
+        turns None into 0.0 WITH a warning, so a missing feed is loud.
+        """
+        if not self.is_enabled():
+            return None
+        account = self._get(_ACCOUNT_PATH)
+        if not isinstance(account, dict):
+            return None
+        last_equity = float(account.get("last_equity") or 0.0)
+        if last_equity <= 0:
+            return None
+        return (float(account["equity"]) - last_equity) / last_equity
 
     # --------------------------------------------------------------- transports
     def _headers(self) -> dict[str, str]:

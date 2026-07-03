@@ -12,40 +12,56 @@ dependency is absent — no Alpaca key, no network:
                 (equity / cash / buying_power / positions). Read-only GET. No key ->
                 "Alpaca key not set" + exit 0.
 - `positions` — print open positions (read-only GET). No key -> informative skip.
-- `cycle`     — run ONE dry-run execution cycle for a promoted strategy artifact:
-                load its params, derive a single illustrative `OrderIntent` for its
-                symbol (SPY), and route it through the REAL `HardLimitFirewall` +
-                `ComplianceEngine` + `Executor` with an isolated `HaltControl`, then
-                print the `CycleReport`. Wiring a full live-signal pipeline is out of
-                scope for this task, so the intent is a minimal illustrative entry.
+- `cycle`     — run ONE execution cycle for a promoted strategy artifact through the
+                REAL production wiring: live quote from the Alpaca data API, daily P&L
+                from the broker account, `build_firewall_context` (the ONE ctx factory),
+                `HardLimitFirewall` with a live `EconCalendarGate`, `ComplianceEngine`
+                fed by `TradeStore.recent_trades`, reconciliation against the last
+                position snapshot, and order/position persistence to `trades.*`.
 
 SAFETY — dry-run by default. `cycle` submits nothing live unless `--live-orders` is
 passed; that flag defaults FALSE and, when set, prints a bold confirmation banner
-before running. `account` / `positions` are read-only GETs and always safe.
+before running. A live cycle REQUIRES a real market quote: with no key/quote the
+runner refuses `--live-orders` and downgrades to a dry-run priced by `--price`.
+`account` / `positions` are read-only GETs and always safe.
 
 Env (read via `os.environ.get`, never required):
     ALPACA_API_KEY / ALPACA_SECRET_KEY — Alpaca paper trading auth.
     ALPACA_PAPER_ENDPOINT — paper trading REST base (default paper-api.alpaca.markets/v2).
+    ALPACA_DATA_ENDPOINT  — market data REST base (default data.alpaca.markets).
+    MAHORAGA_DSN          — Postgres DSN for the trade store (disabled when unset).
+    FRED_API_KEY          — enables the CPI/NFP release calendar in the blackout gate.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from pathlib import Path
 
+import httpx
 import pandas as pd
 
 from services.trader.execution.alpaca_broker import AlpacaBrokerClient
+from services.trader.execution.calendar_gate import EconCalendarGate
 from services.trader.execution.compliance import ComplianceEngine
+from services.trader.execution.context import build_firewall_context
 from services.trader.execution.executor import Executor
 from services.trader.execution.firewall import FirewallContext, HardLimitFirewall
 from services.trader.execution.model import Order, OrderIntent, Portfolio, Side
+from services.trader.execution.reconcile import Reconciler
+from services.trader.execution.trade_store import TradeStore
 from services.trader.ops.halt import HaltControl
 
+logger = logging.getLogger("run_paper")
+
 _DEFAULT_ENDPOINT = "https://paper-api.alpaca.markets/v2"
-_HALT_FLAG = "data/control/run_paper.halt.flag"
+_DEFAULT_DATA_ENDPOINT = "https://data.alpaca.markets"
+
+# The single symbol this Phase-5 smoke trades, and its sector for the 20% cap.
+_SECTOR_MAP = {"SPY": "ETF"}
 
 
 def _broker() -> AlpacaBrokerClient:
@@ -55,6 +71,56 @@ def _broker() -> AlpacaBrokerClient:
         secret=os.environ.get("ALPACA_SECRET_KEY"),
         endpoint=os.environ.get("ALPACA_PAPER_ENDPOINT", _DEFAULT_ENDPOINT),
     )
+
+
+def _latest_trade_price(symbol: str) -> float | None:
+    """Latest REAL trade price from the Alpaca data API; None when unavailable.
+
+    GET {ALPACA_DATA_ENDPOINT}/v2/stocks/{symbol}/trades/latest with the same
+    key headers as `alpaca_news.py`. Graceful-offline: no key, network failure
+    or a malformed payload all return None — the caller decides what a missing
+    quote means (dry-run may fall back to --price; live may NOT).
+    """
+    key = os.environ.get("ALPACA_API_KEY")
+    secret = os.environ.get("ALPACA_SECRET_KEY")
+    if not (key and secret):
+        return None
+    base = os.environ.get("ALPACA_DATA_ENDPOINT", _DEFAULT_DATA_ENDPOINT).rstrip("/")
+    try:
+        resp = httpx.get(
+            f"{base}/v2/stocks/{symbol}/trades/latest",
+            headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        price = float(resp.json()["trade"]["p"])
+    except Exception:
+        logger.warning("latest-trade quote fetch failed for %s", symbol, exc_info=True)
+        return None
+    return price if price > 0 else None
+
+
+def _calendar_gate() -> EconCalendarGate:
+    """The production FOMC/CPI/NFP blackout gate.
+
+    With FRED_API_KEY a real `ReleaseCalendar` backs the CPI/NFP check; without
+    it the gate still enforces the committed FOMC constants AND the C5
+    fail-closed behaviors (schedule-exhausted guard, consecutive-failure
+    blackout), so it is ALWAYS wired into the firewall.
+    """
+    fred_key = os.environ.get("FRED_API_KEY")
+    if not fred_key:
+        logger.warning(
+            "FRED_API_KEY not set — CPI/NFP release-day blackout disabled "
+            "(FOMC constants still enforced)"
+        )
+        return EconCalendarGate(release_calendar=None)
+    from services.trader.data.connectors.fred import HttpxFetcher  # noqa: PLC0415
+    from services.trader.data.connectors.release_calendar import (  # noqa: PLC0415
+        ReleaseCalendar,
+    )
+
+    return EconCalendarGate(release_calendar=ReleaseCalendar(HttpxFetcher(), api_key=fred_key))
 
 
 def _print_portfolio(portfolio: Portfolio) -> None:
@@ -119,8 +185,42 @@ def _illustrative_intent(symbol: str, price: float) -> OrderIntent:
     )
 
 
+def _reconcile_if_stateful(
+    broker: AlpacaBrokerClient,
+    store: TradeStore,
+    halt: HaltControl,
+    portfolio: Portfolio,
+) -> None:
+    """Reconcile the last persisted position snapshot against the broker (C7).
+
+    Reconciling a fresh broker snapshot against itself is vacuous, so the local
+    book comes from the latest `trades.positions` snapshot instead — the value
+    lands from the SECOND run onward, once the store holds state. Skipped (with
+    a note) when the store is disabled, the broker is disabled, or no fresh
+    snapshot exists (first run). A material mismatch trips the kill-switch,
+    which the executor's halt-first check then honors.
+    """
+    if not (store.is_enabled() and broker.is_enabled()):
+        print("reconcile: skipped (trade store or broker disabled)")
+        return
+    local_positions = store.latest_positions()
+    if local_positions is None:
+        print("reconcile: skipped (no fresh position snapshot yet — first run)")
+        return
+    local = Portfolio(
+        equity=portfolio.equity,
+        cash=portfolio.cash,
+        buying_power=portfolio.buying_power,
+        positions=local_positions,
+    )
+    result = Reconciler(broker, halt).reconcile(local)
+    print(f"reconcile: matched={result.matched} halted={result.halted}")
+    for m in result.mismatches:
+        print(f"  mismatch: {m}")
+
+
 def cmd_cycle(args: argparse.Namespace) -> int:
-    """Run ONE dry-run execution cycle for a strategy artifact; print the CycleReport."""
+    """Run ONE execution cycle for a strategy artifact; print the CycleReport."""
     path = Path(args.strategy)
     if not path.exists():
         print(f"strategy artifact not found: {path}; nothing to run")
@@ -128,27 +228,34 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     artifact = _load_artifact(path)
 
     symbol = "SPY"
-    price = float(args.price)
+    live_orders = bool(args.live_orders)
 
-    if args.live_orders:
+    # C2 — a REAL market quote. Live cycles refuse to run without one; dry-run
+    # falls back to the illustrative --price.
+    quote = _latest_trade_price(symbol)
+    if quote is None:
+        if live_orders:
+            print(
+                "no market quote available; refusing --live-orders, "
+                "running dry-run with --price"
+            )
+            live_orders = False
+        price = float(args.price)
+        price_source = f"--price (no quote; illustrative {price})"
+    else:
+        price = quote
+        price_source = f"Alpaca latest trade ({price})"
+
+    if live_orders:
         print("=" * 64)
         print("\033[1m⚠️  LIVE PAPER ORDERS ENABLED — submitting to Alpaca paper account\033[0m")
         print("=" * 64)
 
     broker = _broker()
+    store = TradeStore(os.environ.get("MAHORAGA_DSN"))
+    halt = HaltControl()  # C8 — the DEFAULT repo-wide kill-switch flag.
     now = pd.Timestamp.now(tz="UTC")
     intent = _illustrative_intent(symbol, price)
-
-    def ctx_for(order_intent: OrderIntent, order: Order) -> FirewallContext:
-        return FirewallContext(
-            now=now,
-            regime_confidence=order_intent.regime_confidence,
-            daily_pl_pct=0.0,
-            monthly_pl_pct=0.0,
-            has_stop=order_intent.stop_price is not None,
-            sector="ETF",
-            order_notional=abs(order.qty) * price,
-        )
 
     # Read-only account snapshot when keyed; else an illustrative $100k paper book.
     portfolio = (
@@ -157,24 +264,57 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         else Portfolio(equity=100_000.0, cash=100_000.0, buying_power=100_000.0, positions={})
     )
 
+    # C7 — reconcile the persisted book against the broker BEFORE trading.
+    _reconcile_if_stateful(broker, store, halt, portfolio)
+
+    # C2 — REAL P&L context. Daily from the broker account (equity vs
+    # last_equity); monthly falls back to None -> 0.0 + WARNING inside
+    # `build_firewall_context` (trades.pnl_daily wiring lands with ops).
+    daily_pl_pct = broker.daily_pl_pct()
+
+    def ctx_for(order_intent: OrderIntent, order: Order) -> FirewallContext:
+        return build_firewall_context(
+            order_intent,
+            order,
+            portfolio,
+            now=now,
+            price=price,
+            atr_value=None,  # ATR feed lands with the live-signal pipeline.
+            daily_pl_pct=daily_pl_pct,
+            monthly_pl_pct=None,
+            sector_map=_SECTOR_MAP,
+        )
+
     executor = Executor(
         broker=broker,
-        firewall=HardLimitFirewall(),
+        firewall=HardLimitFirewall(calendar_gate=_calendar_gate()),
         compliance=ComplianceEngine(),
-        halt=HaltControl(flag_path=_HALT_FLAG),
-        live_orders=args.live_orders,
+        halt=halt,
+        live_orders=live_orders,
+        recent_trades=store.recent_trades,  # C3 — compliance sees real history.
+        on_submit=lambda submitted_intent, returned_order: store.record_order(
+            returned_order, reason=submitted_intent.reason
+        ),
     )
     report = executor.run_cycle(
         [intent], portfolio, prices={symbol: price}, ctx_for=ctx_for
     )
 
-    mode = "LIVE PAPER" if args.live_orders else "dry-run"
+    # C7 — persist the post-cycle position snapshot (no-op when disabled).
+    if broker.is_enabled():
+        store.snapshot_positions(broker.account())
+    store.close()
+
+    mode = "LIVE PAPER" if live_orders else "dry-run"
     keyed = "enabled" if broker.is_enabled() else "disabled (no key)"
-    print(f"strategy {artifact.get('run_id', path.stem)} — {mode} cycle on {symbol} @ {price}")
+    stored = "enabled" if store.is_enabled() else "disabled (no MAHORAGA_DSN)"
+    print(f"strategy {artifact.get('run_id', path.stem)} — {mode} cycle on {symbol}")
+    print(f"price:  {price_source}")
     print(f"broker: {keyed}")
+    print(f"store:  {stored}")
     print(
         f"CycleReport(intents={report.intents}, submitted={report.submitted}, "
-        f"rejected={report.rejected}, halted={report.halted})"
+        f"rejected={report.rejected}, errors={report.errors}, halted={report.halted})"
     )
     for r in report.rejections:
         print(f"  rejected: {r}")
@@ -182,6 +322,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     ap = argparse.ArgumentParser(
         description="Phase-5 paper-trading runner (graceful-offline, dry-run default)"
     )
@@ -193,18 +334,23 @@ def main() -> int:
     p_positions = sub.add_parser("positions", help="print open positions (read-only GET)")
     p_positions.set_defaults(func=cmd_positions)
 
-    p_cycle = sub.add_parser("cycle", help="run ONE dry-run execution cycle for a strategy")
+    p_cycle = sub.add_parser("cycle", help="run ONE execution cycle for a strategy")
     p_cycle.add_argument(
         "--strategy", required=True, help="path to a promoted strategy artifact (JSON)"
     )
     p_cycle.add_argument(
-        "--price", type=float, default=100.0, help="illustrative price for the symbol"
+        "--price",
+        type=float,
+        default=100.0,
+        help="illustrative fallback price — used ONLY when no real quote is "
+        "available, and never for --live-orders",
     )
     p_cycle.add_argument(
         "--live-orders",
         action="store_true",
         default=False,
-        help="submit REAL paper orders to Alpaca (default OFF — everything dry-run)",
+        help="submit REAL paper orders to Alpaca (default OFF — everything dry-run; "
+        "requires a real market quote)",
     )
     p_cycle.set_defaults(func=cmd_cycle)
 

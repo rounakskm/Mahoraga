@@ -110,3 +110,45 @@ def test_wash_sale_profitable_sale_allowed() -> None:
 def test_ssr_stub_always_ok() -> None:
     engine = ComplianceEngine()
     assert engine._ssr_ok(_buy("AAPL")) is True
+
+
+# ---------------------------------------------------------------------------
+# C10 — timezone normalization: naive timestamps are treated as UTC, and mixed
+# naive/aware inputs never raise.
+# ---------------------------------------------------------------------------
+
+
+def test_naive_trade_ts_vs_aware_now_wash_sale_detected() -> None:
+    """A naive loss-sale ts against an aware `now` must still trip the wash-sale."""
+    now = pd.Timestamp("2026-07-01 15:00", tz="UTC")
+    engine = ComplianceEngine()
+    trades = [
+        TradeRecord(
+            ticker="AAPL",
+            side=Side.SELL,
+            ts=pd.Timestamp("2026-06-20 15:00"),  # naive -> treated as UTC
+            realized_pl=-50.0,
+            is_day_trade=False,
+        )
+    ]
+    verdict = engine.check(_buy("AAPL"), _portfolio(100_000.0), trades, now)
+    assert verdict.allowed is False
+    assert any("wash-sale" in r for r in verdict.rejections)
+
+
+def test_aware_trade_ts_vs_naive_now_no_raise() -> None:
+    """Aware trade ts + naive `now` (treated as UTC) compares without raising."""
+    now = pd.Timestamp("2026-07-01 15:00")  # naive -> treated as UTC
+    engine = ComplianceEngine()
+    trades = [
+        TradeRecord(
+            ticker="AAPL",
+            side=Side.SELL,
+            ts=pd.Timestamp("2026-06-20 15:00", tz="UTC"),
+            realized_pl=-50.0,
+            is_day_trade=True,
+        )
+    ]
+    verdict = engine.check(_buy("AAPL"), _portfolio(100_000.0), trades, now)
+    assert verdict.allowed is False
+    assert any("wash-sale" in r for r in verdict.rejections)

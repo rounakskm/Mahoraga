@@ -93,5 +93,77 @@ def test_non_release_day_with_calendar_returning_other_date() -> None:
     assert gate.is_blackout(now) is False
 
 
+# ---------------------------------------------------------------------------
+# C5 — fail-closed on persistent calendar failure, FOMC-schedule expiry guard,
+# and US/Eastern date normalization.
+# ---------------------------------------------------------------------------
+
+_FAR_FUTURE_FOMC = date(2099, 1, 1)  # keeps the expiry guard out of the way.
+
+
+def test_three_consecutive_failures_fail_closed() -> None:
+    """1st/2nd lookup failures stay graceful-open; the 3rd fails CLOSED (blackout)."""
+    gate = EconCalendarGate(
+        release_calendar=_RaisingCalendar(), fomc_dates=[_FAR_FUTURE_FOMC]
+    )
+    now = pd.Timestamp("2026-07-15 09:30:00")
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is False  # failure 1
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is False  # failure 2
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is True  # failure 3 -> closed
+
+
+def test_successful_lookup_resets_failure_counter() -> None:
+    """A success between failures resets the consecutive-failure count."""
+
+    class _FlakyCalendar:
+        def __init__(self) -> None:
+            self.fail = True
+
+        def as_of_release_date(self, series_id: str, reference_date: date) -> date:
+            if self.fail:
+                raise RuntimeError("FRED unreachable")
+            return date(2099, 6, 1)  # not today -> no blackout
+
+    cal = _FlakyCalendar()
+    gate = EconCalendarGate(release_calendar=cal, fomc_dates=[_FAR_FUTURE_FOMC])
+    now = pd.Timestamp("2026-07-15 09:30:00")
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is False  # failure 1
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is False  # failure 2
+    cal.fail = False
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is False  # success -> reset
+    cal.fail = True
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is False  # failure 1 again
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is False  # failure 2
+    assert gate.is_blackout(now, series=("CPIAUCSL",)) is True  # failure 3 -> closed
+
+
+def test_last_known_fomc() -> None:
+    gate = EconCalendarGate(release_calendar=None)
+    assert gate.last_known_fomc() == max(EconCalendarGate.DEFAULT_FOMC_DATES)
+    assert EconCalendarGate(release_calendar=None, fomc_dates=[]).last_known_fomc() is None
+
+
+def test_fomc_schedule_exhausted_fails_closed() -> None:
+    """Past the last known FOMC date the gate refuses entries until updated."""
+    gate = EconCalendarGate(release_calendar=None)
+    beyond = pd.Timestamp(max(EconCalendarGate.DEFAULT_FOMC_DATES)) + pd.Timedelta(days=30)
+    assert gate.is_blackout(beyond) is True
+
+
+def test_fomc_day_matched_in_eastern_time() -> None:
+    """2026-09-17 03:00 UTC is still 2026-09-16 (FOMC day) in US/Eastern."""
+    gate = EconCalendarGate(release_calendar=None, fomc_dates=[date(2026, 9, 16)])
+    now = pd.Timestamp("2026-09-17 03:00:00", tz="UTC")
+    assert gate.is_blackout(now) is True
+
+
+def test_day_after_fomc_in_eastern_is_no_blackout() -> None:
+    gate = EconCalendarGate(
+        release_calendar=None, fomc_dates=[date(2026, 9, 16), _FAR_FUTURE_FOMC]
+    )
+    now = pd.Timestamp("2026-09-17 15:00:00", tz="UTC")  # 11:00 ET on the 17th.
+    assert gate.is_blackout(now) is False
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -26,14 +26,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from services.trader.execution.compliance import ComplianceVerdict
+from services.trader.execution.compliance import ComplianceVerdict, TradeRecord
 from services.trader.execution.firewall import FirewallContext, FirewallVerdict
-from services.trader.execution.model import Order, OrderIntent, Portfolio
+from services.trader.execution.model import Order, OrderIntent, OrderStatus, Portfolio
 from services.trader.execution.sizing import size_order
 
 logger = logging.getLogger(__name__)
 
 CtxBuilder = Callable[[OrderIntent, Order], FirewallContext]
+RecentTradesProvider = Callable[[], list[TradeRecord]]
+OnSubmitHook = Callable[[OrderIntent, Order], None]
 
 
 class _BrokerLike(Protocol):
@@ -78,12 +80,18 @@ class _HindsightLike(Protocol):
 
 @dataclass(frozen=True)
 class CycleReport:
-    """Outcome of one execution cycle."""
+    """Outcome of one execution cycle.
+
+    `errors` counts intents whose broker submit RAISED (an HTTP/broker error):
+    those are neither submitted nor rejected — the order's true state at the
+    broker is unknown and reconciliation is the recovery path.
+    """
 
     intents: int
     submitted: int
     rejected: int
     halted: bool
+    errors: int = 0
     rejections: list[str] = field(default_factory=list)
 
 
@@ -91,7 +99,13 @@ class Executor:
     """Runs order intents through halt -> size -> firewall -> compliance -> broker.
 
     `live_orders` defaults False: every submit is a dry-run. Set it True only via
-    an explicit, surfaced human decision (the CLAUDE.md real-capital gate).
+    an explicit, surfaced human decision (the CLAUDE.md real-capital gate). It is
+    read-only after construction — no code path may flip a dry-run executor live.
+
+    `recent_trades` supplies the compliance engine's trade history (PDT /
+    wash-sale), fetched ONCE per cycle. `on_submit` is a best-effort persistence
+    hook (trade store) called with the broker's RETURNED order; its failures are
+    contained and never affect order accounting.
     """
 
     def __init__(
@@ -103,13 +117,22 @@ class Executor:
         *,
         hindsight: _HindsightLike | None = None,
         live_orders: bool = False,
+        recent_trades: RecentTradesProvider | None = None,
+        on_submit: OnSubmitHook | None = None,
     ) -> None:
         self.broker = broker
         self.firewall = firewall
         self.compliance = compliance
         self.halt = halt
         self.hindsight = hindsight
-        self.live_orders = live_orders
+        self._live_orders = live_orders
+        self._recent_trades = recent_trades
+        self._on_submit = on_submit
+
+    @property
+    def live_orders(self) -> bool:
+        """Whether submits are live (True) or dry-run (False). Read-only."""
+        return self._live_orders
 
     def run_cycle(
         self,
@@ -127,20 +150,28 @@ class Executor:
         """
         submitted = 0
         rejected = 0
+        errors = 0
         rejections: list[str] = []
+
+        # Trade history for compliance — fetched ONCE per cycle (C3): every
+        # intent is judged against the same PDT / wash-sale history snapshot.
+        recent_trades: list[TradeRecord] = (
+            self._recent_trades() if self._recent_trades is not None else []
+        )
 
         for intent in intents:
             # 1. Halt FIRST — a tripped kill-switch stops the cycle immediately.
             if self.halt.is_halted():
                 logger.warning(
                     "HALT active — stopping cycle; %d intent(s) not processed",
-                    len(intents) - submitted - rejected,
+                    len(intents) - submitted - rejected - errors,
                 )
                 return CycleReport(
                     intents=len(intents),
                     submitted=submitted,
                     rejected=rejected,
                     halted=True,
+                    errors=errors,
                     rejections=rejections,
                 )
 
@@ -173,7 +204,7 @@ class Executor:
 
             # 5. Compliance — BEFORE the broker; never submit if denied.
             cv = self.compliance.check(
-                intent, portfolio, recent_trades=[], now=ctx.now
+                intent, portfolio, recent_trades=recent_trades, now=ctx.now
             )
             if not cv.allowed:
                 rejected += 1
@@ -183,9 +214,31 @@ class Executor:
                 logger.info("REJECT %s compliance: %s", intent.ticker, cv.rejections)
                 continue
 
-            # 6. Submit — dry-run unless live_orders explicitly enabled.
-            dry_run = not self.live_orders
-            self.broker.submit_order(order, dry_run=dry_run)
+            # 6. Submit — dry-run unless live_orders explicitly enabled. A broker
+            # exception is contained per-intent (C9): counted under `errors`,
+            # the cycle continues, and the report is never lost.
+            dry_run = not self._live_orders
+            try:
+                returned = self.broker.submit_order(order, dry_run=dry_run)
+            except Exception:
+                errors += 1
+                logger.exception(
+                    "broker error submitting %s %s qty=%s — intent counted as "
+                    "error (neither submitted nor rejected); continuing cycle",
+                    intent.side,
+                    intent.ticker,
+                    order.qty,
+                )
+                continue
+
+            # The broker may ACCEPT the call but REJECT the order.
+            if returned is not None and returned.status is OrderStatus.REJECTED:
+                rejected += 1
+                reason = f"{intent.ticker}: broker returned status REJECTED (id={returned.id})"
+                rejections.append(reason)
+                logger.info("REJECT %s", reason)
+                continue
+
             submitted += 1
             logger.info(
                 "SUBMIT %s %s qty=%s dry_run=%s",
@@ -194,6 +247,7 @@ class Executor:
                 order.qty,
                 dry_run,
             )
+            self._record_submit(intent, returned if returned is not None else order)
             self._retain(intent, order, ctx, dry_run)
 
         return CycleReport(
@@ -201,8 +255,21 @@ class Executor:
             submitted=submitted,
             rejected=rejected,
             halted=False,
+            errors=errors,
             rejections=rejections,
         )
+
+    def _record_submit(self, intent: OrderIntent, returned: Order) -> None:
+        """Invoke the on_submit persistence hook; failures logged, never re-raised."""
+        if self._on_submit is None:
+            return
+        try:
+            self._on_submit(intent, returned)
+        except Exception:
+            logger.exception(
+                "on_submit hook failed for %s (ignored — accounting unaffected)",
+                intent.ticker,
+            )
 
     def _retain(
         self,
@@ -211,21 +278,31 @@ class Executor:
         ctx: FirewallContext,
         dry_run: bool,
     ) -> None:
-        """Retain the decision context as a Hindsight Experience Fact (best-effort)."""
-        if self.hindsight is None or not self.hindsight.is_enabled():
-            return
-        text = (
-            f"Executed {intent.side} {intent.ticker} qty={order.qty} "
-            f"(reason: {intent.reason}; regime_confidence={intent.regime_confidence:.2f}; "
-            f"dry_run={dry_run})"
-        )
-        metadata = {
-            "kind": "execution",
-            "ticker": intent.ticker,
-            "side": str(intent.side),
-            "qty": order.qty,
-            "reason": intent.reason,
-            "regime_confidence": intent.regime_confidence,
-            "dry_run": dry_run,
-        }
-        self.hindsight.retain(text, metadata)
+        """Retain the decision context as a Hindsight Experience Fact (best-effort).
+
+        Contained (C9): a Hindsight failure is logged and ignored — memory
+        writes must never affect order accounting.
+        """
+        try:
+            if self.hindsight is None or not self.hindsight.is_enabled():
+                return
+            text = (
+                f"Executed {intent.side} {intent.ticker} qty={order.qty} "
+                f"(reason: {intent.reason}; regime_confidence={intent.regime_confidence:.2f}; "
+                f"dry_run={dry_run})"
+            )
+            metadata = {
+                "kind": "execution",
+                "ticker": intent.ticker,
+                "side": str(intent.side),
+                "qty": order.qty,
+                "reason": intent.reason,
+                "regime_confidence": intent.regime_confidence,
+                "dry_run": dry_run,
+            }
+            self.hindsight.retain(text, metadata)
+        except Exception:
+            logger.exception(
+                "hindsight retain failed for %s (ignored — accounting unaffected)",
+                intent.ticker,
+            )
