@@ -61,6 +61,106 @@ def test_unknown_command_returns_help(tmp_path: Path) -> None:
     assert "/status" in reply
 
 
+# --- extended commands: /regime /strategy /kb /report (Phase-6 Task 3) ---
+
+
+def _ops_with(tmp_path: Path, **providers: object) -> TelegramOps:
+    halt = HaltControl(tmp_path / "halt.flag")
+    reporter = Reporter(None)
+    return TelegramOps(halt, reporter, token=None, **providers)  # type: ignore[arg-type]
+
+
+def test_regime_command_returns_provider_render(tmp_path: Path) -> None:
+    ops = _ops_with(tmp_path, regime_provider=lambda: "regime: BULL (p_transition=0.12)")
+    assert ops.handle("/regime") == "regime: BULL (p_transition=0.12)"
+
+
+def test_regime_command_without_provider_says_not_wired(tmp_path: Path) -> None:
+    ops = _ops(tmp_path)
+    assert "not wired" in ops.handle("/regime")
+
+
+def test_strategy_command_passes_hash_to_provider(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def provider(strategy_hash: str) -> str:
+        seen.append(strategy_hash)
+        return f"strategy {strategy_hash}: momentum-v3"
+
+    ops = _ops_with(tmp_path, strategy_provider=provider)
+    reply = ops.handle("/strategy abc123")
+    assert seen == ["abc123"]
+    assert reply == "strategy abc123: momentum-v3"
+
+
+def test_strategy_command_without_arg_returns_usage(tmp_path: Path) -> None:
+    ops = _ops_with(tmp_path, strategy_provider=lambda h: h)
+    reply = ops.handle("/strategy")
+    assert "usage" in reply.lower()
+    assert "/strategy" in reply
+
+
+def test_strategy_command_without_provider_says_not_wired(tmp_path: Path) -> None:
+    ops = _ops(tmp_path)
+    assert "not wired" in ops.handle("/strategy abc123")
+
+
+def test_kb_command_returns_provider_render(tmp_path: Path) -> None:
+    ops = _ops_with(tmp_path, kb_provider=lambda: "KB: 3 recent highlights")
+    assert ops.handle("/kb") == "KB: 3 recent highlights"
+
+
+def test_kb_command_without_provider_says_not_wired(tmp_path: Path) -> None:
+    ops = _ops(tmp_path)
+    assert "not wired" in ops.handle("/kb")
+
+
+def test_report_command_routes_daily_and_weekly(tmp_path: Path) -> None:
+    ops = _ops_with(tmp_path, report_provider=lambda kind: f"{kind} report body")
+    assert ops.handle("/report daily") == "daily report body"
+    assert ops.handle("/report weekly") == "weekly report body"
+
+
+def test_report_command_bad_or_missing_kind_returns_usage(tmp_path: Path) -> None:
+    ops = _ops_with(tmp_path, report_provider=lambda kind: kind)
+    for cmd in ("/report", "/report nonsense"):
+        reply = ops.handle(cmd)
+        assert "usage" in reply.lower()
+        assert "/report" in reply
+
+
+def test_report_command_without_provider_says_not_wired(tmp_path: Path) -> None:
+    ops = _ops(tmp_path)
+    assert "not wired" in ops.handle("/report daily")
+
+
+def test_raising_provider_returns_error_reply_not_exception(tmp_path: Path) -> None:
+    def boom() -> str:
+        raise RuntimeError("hindsight down")
+
+    def boom_arg(_: str) -> str:
+        raise RuntimeError("registry down")
+
+    ops = _ops_with(
+        tmp_path,
+        regime_provider=boom,
+        strategy_provider=boom_arg,
+        kb_provider=boom,
+        report_provider=boom_arg,
+    )
+    for cmd in ("/regime", "/strategy abc", "/kb", "/report daily"):
+        reply = ops.handle(cmd)
+        assert "provider error" in reply
+    assert "hindsight down" in ops.handle("/regime")
+
+
+def test_help_lists_all_seven_commands(tmp_path: Path) -> None:
+    ops = _ops(tmp_path)
+    reply = ops.handle("/help")
+    for cmd in ("/halt", "/resume", "/status", "/regime", "/strategy", "/kb", "/report"):
+        assert cmd in reply
+
+
 def _update(text: str | None = "/status", chat_id: object = 42) -> dict:
     message: dict = {}
     if text is not None:
