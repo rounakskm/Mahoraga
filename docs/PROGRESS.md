@@ -16,7 +16,7 @@ the per-phase specs + `docs/measurements/*-exit-verification.md`.
 | 3 | **Autoresearch loop** — the self-improving core | ✅ **Layers 1–3 built & proven on real SPY** (fleet runs; replay walks ~5yr; exit-criteria sign-off pending: nightly-8h + DSN race test) |
 | 4 | News / sentiment intelligence (MICRO lens) | ✅ **built & proven on live Alpaca news** — full-spec build; 169 real SPY items classified, real PIT sentiment feature; [plan](superpowers/specs/phase-4-intelligence-layer/plan.md) + [tasks](superpowers/specs/phase-4-intelligence-layer/tasks.md) |
 | 5 | Broker integration (paper) | ✅ **code complete; connects to live paper account** — firewall-gated, dry-run default; live paper-order run is a user-gated switch (`--live-orders`); [plan](superpowers/specs/phase-5-broker-paper-trading/plan.md) + [tasks](superpowers/specs/phase-5-broker-paper-trading/tasks.md) |
-| 6 | Governance + live prep (dashboard, Telegram, audit, convergence) | 🟡 **in progress** — [plan](superpowers/specs/phase-6-governance-live-prep/plan.md) + [tasks](superpowers/specs/phase-6-governance-live-prep/tasks.md) |
+| 6 | Governance + live prep (dashboard, Telegram, audit, convergence) | ✅ **code complete** — all 7 operator surfaces built; convergence report is the fail-closed real-capital gate; [plan](superpowers/specs/phase-6-governance-live-prep/plan.md) + [tasks](superpowers/specs/phase-6-governance-live-prep/tasks.md) |
 | 7 | Full autonomous operation | ⚪ not started |
 
 ## Phase 3 — layer detail (the heart of the system)
@@ -136,11 +136,35 @@ in-limits orders submit **dry-run** by default.
 `run_paper.py cycle --live-orders` is passed (prints a ⚠️ banner). The 30-day unattended
 paper window + Sharpe>1.0 readiness gate are operational (Phase-6 monitoring), not code.
 
+## Phase 6 — governance + live prep ✅ code complete (PRs #82–#85)
+
+All 7 operator surfaces, built in 3 waves ([plan.md](superpowers/specs/phase-6-governance-live-prep/plan.md) / [tasks.md](superpowers/specs/phase-6-governance-live-prep/tasks.md)):
+- **AuditLog** — hash-chained append + chain verification over migration-003 `audit.events`
+  (sha256 prev-hash linkage, tamper detection, crash-safe autocommit rows).
+- **Performance attribution** — FIFO round-trips from production `trades.orders` →
+  P&L by regime / ticker / side / holding-period.
+- **Telegram bot** — `/halt` `/resume` `/status` `/regime` `/strategy <hash>` `/kb`
+  `/report daily|weekly`; per-chat-ID allowlist; provider errors reply, never crash.
+- **Secrets audit (CI)** — `.env` gitignored, zero key-material in tracked files,
+  sandbox writable scopes confined to /sandbox+/tmp. Keyring deferred to cloud deploy.
+- **Streamlit dashboard** — `uv run --with streamlit streamlit run scripts/dashboard.py`:
+  HALT/RESUME buttons on the shared kill-switch, halt banner, regime / positions /
+  orders / P&L / fleet / KB / attribution panels, per-panel failure isolation.
+- **Convergence report** — `scripts/convergence_report.py`: the **fail-closed**
+  real-capital go/no-go (unmeasured criterion = FAIL). Thresholds: ≥1 vault-holding
+  deployment-eligible strategy · replay ≥3yr · all 4 regimes ≥5% · KB ≥100 facts ·
+  paper ≥30 days · paper Sharpe >1.0. First snapshot committed: **NOT READY** (honest —
+  the paper window hasn't run). A passing report is necessary; the flip stays human.
+
+Prior to Phase 6, a **three-reviewer adversarial audit** of Phases 3–5 found and fixed
+7 Critical + ~15 Important findings (PR #81) — theme: gates were sound, production
+inputs were fake/miswired. Lesson recorded in memory + applied to all Phase-6 code.
+
 ## Current focus
 
-**Phases 1–5 code-complete.** The system trains on ~5yr of real SPY regimes, reads real
-news sentiment, and has a firewall-gated paper-execution path wired to the live Alpaca
-paper account (read-only proven; order submission gated behind `--live-orders`).
-**Next decision is the operator's:** flip on live paper orders for the 30-day window, or
-build Phase 6 ops (dashboard/Telegram monitoring) first. **Real-capital go-live remains a
-human gate** (convergence report + explicit sign-off), per CLAUDE.md — unchanged.
+**Phases 1–6 code-complete.** Trains on ~5yr real SPY regimes, reads real news
+sentiment, firewall-gated paper execution wired to the live Alpaca paper account, full
+operator surfaces (dashboard / Telegram / audit / attribution / convergence gate).
+**Next: the 30-day live paper window** (`run_paper.py cycle --live-orders`, operator's
+switch) — its results feed the convergence report, which is the fail-closed gate for
+Phase 7 / real capital. **Real-capital go-live remains a human sign-off**, per CLAUDE.md.

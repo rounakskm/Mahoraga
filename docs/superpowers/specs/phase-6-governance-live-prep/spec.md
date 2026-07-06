@@ -1,6 +1,6 @@
 # Phase 6 — Governance + Live Prep Spec
 
-**Status:** Approved 2026-04-26
+**Status:** Approved 2026-04-26; **code complete 2026-07-06** (PRs #82–#85; [plan.md](plan.md) / [tasks.md](tasks.md)). All 7 sub-features shipped: AuditLog hash-chain + verification, performance attribution, extended Telegram bot (7 commands, allowlisted), secrets sandbox audit in CI, DashboardData + Streamlit dashboard with HALT/RESUME kill-switch UX, and the fail-closed convergence report (first honest snapshot: NOT READY — awaits the 30-day paper window). Remaining exit items are operational: the paper window itself + the convergence report's PASS, which stays a human sign-off. See [`../../PROGRESS.md`](../../PROGRESS.md).
 **Type:** Phase-level spec
 **Phase duration:** 5 weeks
 **Anchor specs:** [`../2026-04-25-mahoraga-architecture-decomposition.md`](../2026-04-25-mahoraga-architecture-decomposition.md)
