@@ -152,6 +152,21 @@ class TradeStore:
             )
         return records
 
+    def tickers_ordered_since_snapshot(self) -> frozenset[str]:
+        """Tickers with orders recorded AFTER the latest position snapshot.
+
+        These explain a broker-vs-snapshot divergence (an entry submitted after
+        yesterday's snapshot filled at today's open), so the reconciler treats
+        them as explained rather than halting. Disabled/no orders -> empty set.
+        """
+        if not self.is_enabled():
+            return frozenset()
+        rows = self._get_conn().execute(
+            "SELECT DISTINCT ticker FROM trades.orders "
+            "WHERE ts > COALESCE((SELECT MAX(ts) FROM trades.positions), 'epoch')"
+        ).fetchall()
+        return frozenset(r[0] for r in rows)
+
     def latest_positions(self, max_age_hours: float = 24.0) -> dict[str, Position] | None:
         """Positions from the most recent `trades.positions` snapshot batch.
 

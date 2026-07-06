@@ -160,9 +160,22 @@ Prior to Phase 6, a **three-reviewer adversarial audit** of Phases 3–5 found a
 7 Critical + ~15 Important findings (PR #81) — theme: gates were sound, production
 inputs were fake/miswired. Lesson recorded in memory + applied to all Phase-6 code.
 
+## Paper window — STARTED 2026-07-06 (live paper orders, zero real capital)
+
+The first live paper order is in: **BUY 3 SPY (market/OTO)** from the real signal
+(`seed4` artifact: regime `ranging_high_vol`, close 751.28 > SMA30 744.85), accepted by
+Alpaca with the protective 2×ATR stop leg resting at the venue; persisted to
+`trades.orders`; day-0 `trades.pnl_daily` baseline recorded ($100k). Live-run fixes
+landed en route (each caught by a safety layer doing its job): Alpaca bars need an
+explicit `start` + tail-slice; whole-share sizing for OTO orders; penny-rounded stop
+prices; broker 4xx bodies now logged; reconciler accepts divergences EXPLAINED by
+post-snapshot orders (no false halt when the overnight entry fills at the open).
+Daily cadence: `scripts/paper_window.sh` + `infra/ops/com.mahoraga.paper-window.plist`
+([runbook](runbooks/paper-window.md)) — the launchd install is the operator's step.
+
 ## Current focus
 
-**Phases 1–6 code-complete.** Trains on ~5yr real SPY regimes, reads real news
+**Phases 1–6 code-complete; the 30-day paper window is live.** Trains on ~5yr real SPY regimes, reads real news
 sentiment, firewall-gated paper execution wired to the live Alpaca paper account, full
 operator surfaces (dashboard / Telegram / audit / attribution / convergence gate).
 **Next: the 30-day live paper window** (`run_paper.py cycle --live-orders`, operator's

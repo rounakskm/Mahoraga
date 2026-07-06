@@ -17,6 +17,7 @@ and the halt only through `HaltControl`; no runtime-specific glue.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -28,6 +29,9 @@ class _BrokerPositions(Protocol):
     """Structural type: anything exposing broker positions by ticker."""
 
     def positions(self) -> dict[str, Position]: ...
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -52,8 +56,17 @@ class Reconciler:
         self.halt = halt
         self.notional_tolerance = notional_tolerance
 
-    def reconcile(self, local: Portfolio) -> ReconResult:
-        """Fetch broker positions, diff against `local.positions`, halt on any mismatch."""
+    def reconcile(
+        self, local: Portfolio, *, explained_tickers: frozenset[str] = frozenset()
+    ) -> ReconResult:
+        """Fetch broker positions, diff against `local.positions`, halt on any mismatch.
+
+        `explained_tickers`: tickers whose divergence is EXPLAINED by orders the
+        trade store recorded after the local snapshot was taken (e.g. an entry
+        submitted after yesterday's snapshot filled at today's open). Mismatches
+        on those tickers are logged, not halted — an unexplained position still
+        fails closed.
+        """
         broker_positions = self.broker.positions()
 
         # Graceful-offline guard: a disabled/empty broker with an empty local
@@ -64,16 +77,24 @@ class Reconciler:
         mismatches: list[str] = []
         tolerance = self.notional_tolerance * max(local.equity, 1.0)
 
+        def _flag(ticker: str, message: str) -> None:
+            if ticker in explained_tickers:
+                logger.info("reconcile: %s — explained by post-snapshot orders", message)
+                return
+            mismatches.append(message)
+
         # Phantom positions: present on exactly one side.
         for ticker in sorted(set(broker_positions) - set(local.positions)):
             mv = broker_positions[ticker].market_value
-            mismatches.append(
-                f"phantom broker position {ticker} (market_value={mv:.2f}, not in local)"
+            _flag(
+                ticker,
+                f"phantom broker position {ticker} (market_value={mv:.2f}, not in local)",
             )
         for ticker in sorted(set(local.positions) - set(broker_positions)):
             mv = local.positions[ticker].market_value
-            mismatches.append(
-                f"phantom local position {ticker} (market_value={mv:.2f}, not in broker)"
+            _flag(
+                ticker,
+                f"phantom local position {ticker} (market_value={mv:.2f}, not in broker)",
             )
 
         # Notional drift on shared tickers.
@@ -83,8 +104,9 @@ class Reconciler:
                 - local.positions[ticker].market_value
             )
             if drift > tolerance:
-                mismatches.append(
-                    f"notional drift {ticker} (drift={drift:.2f} > tol={tolerance:.2f})"
+                _flag(
+                    ticker,
+                    f"notional drift {ticker} (drift={drift:.2f} > tol={tolerance:.2f})",
                 )
 
         halted = False
