@@ -21,6 +21,9 @@ test = [
     "psycopg[binary]>=3.2",
     "respx>=0.21",  # httpx test fixtures (used in chunk 1+ tests)
 ]
+ops = [
+    "streamlit>=1.40",  # ops dashboard shell (scripts/dashboard.py) — never imported under services/
+]
 
 # Mahoraga is a multi-tree repo (docs/, data/, infra/, services/, tests/, vendor/).
 # Tell setuptools to only treat the `services` tree as installable Python; everything
