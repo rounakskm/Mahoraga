@@ -185,7 +185,7 @@ def _market_order(side: Side, stop: float | None) -> Order:
 def test_buy_entry_with_stop_emits_oto_bracket() -> None:
     body = AlpacaBrokerClient._order_to_body(_market_order(Side.BUY, stop=96.0))
     assert body["order_class"] == "oto"
-    assert body["stop_loss"] == {"stop_price": "96.0"}
+    assert body["stop_loss"] == {"stop_price": "96.00"}  # penny-rounded (42210000)
     assert "stop_price" not in body  # never a bare stop on a market order
     assert body["type"] == "market"
 

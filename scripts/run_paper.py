@@ -124,14 +124,23 @@ def _daily_bars(symbol: str, limit: int = 450) -> pd.DataFrame | None:
         return None
     base = os.environ.get("ALPACA_DATA_ENDPOINT", _DEFAULT_DATA_ENDPOINT).rstrip("/")
     try:
+        # Alpaca defaults `start` to TODAY (one bar), and `limit` returns the
+        # FIRST N bars after `start`, not the most recent — so request a ~700
+        # calendar-day window (covers 450 trading days) and keep the tail.
+        start = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=700)).date().isoformat()
         resp = httpx.get(
             f"{base}/v2/stocks/{symbol}/bars",
-            params={"timeframe": "1Day", "limit": limit, "adjustment": "split"},
+            params={
+                "timeframe": "1Day",
+                "start": start,
+                "limit": 10_000,
+                "adjustment": "split",
+            },
             headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret},
             timeout=30,
         )
         resp.raise_for_status()
-        raw = resp.json().get("bars") or []
+        raw = (resp.json().get("bars") or [])[-limit:]
         if not raw:
             return None
         frame = pd.DataFrame(
@@ -263,7 +272,10 @@ def _reconcile_if_stateful(
         buying_power=portfolio.buying_power,
         positions=local_positions,
     )
-    result = Reconciler(broker, halt).reconcile(local)
+    # Orders recorded after the snapshot EXPLAIN a divergence (e.g. an entry
+    # submitted post-snapshot filled at the open) — log, don't false-halt.
+    explained = store.tickers_ordered_since_snapshot()
+    result = Reconciler(broker, halt).reconcile(local, explained_tickers=explained)
     print(f"reconcile: matched={result.matched} halted={result.halted}")
     for m in result.mismatches:
         print(f"  mismatch: {m}")
@@ -374,6 +386,8 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         on_submit=lambda submitted_intent, returned_order: store.record_order(
             returned_order, reason=submitted_intent.reason
         ),
+        # Alpaca rejects fractional qty on OTO/bracket orders -> whole shares.
+        allow_fractional=False,
     )
     report = executor.run_cycle(
         intents, portfolio, prices={symbol: price}, ctx_for=ctx_for

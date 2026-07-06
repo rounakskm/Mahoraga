@@ -119,6 +119,7 @@ class Executor:
         live_orders: bool = False,
         recent_trades: RecentTradesProvider | None = None,
         on_submit: OnSubmitHook | None = None,
+        allow_fractional: bool = True,
     ) -> None:
         self.broker = broker
         self.firewall = firewall
@@ -128,6 +129,9 @@ class Executor:
         self._live_orders = live_orders
         self._recent_trades = recent_trades
         self._on_submit = on_submit
+        # Alpaca rejects fractional qty on advanced order classes (OTO/bracket),
+        # so live runners size whole shares; tests/backtests keep fractional.
+        self._allow_fractional = allow_fractional
 
     @property
     def live_orders(self) -> bool:
@@ -185,7 +189,9 @@ class Executor:
                 continue
 
             # 3. Sizing.
-            order = size_order(intent, portfolio, price)
+            order = size_order(
+                intent, portfolio, price, allow_fractional=self._allow_fractional
+            )
             if order is None:
                 rejected += 1
                 reason = f"{intent.ticker}: sized to zero / sub-min notional (skipped)"

@@ -118,3 +118,36 @@ def test_both_empty_matches_no_halt(tmp_path: Path) -> None:
     assert result.mismatches == []
     assert result.halted is False
     assert halt.is_halted() is False
+
+
+def test_explained_phantom_does_not_halt(tmp_path) -> None:
+    """A broker position explained by post-snapshot orders is logged, not halted."""
+    halt = HaltControl(tmp_path / "halt.flag")
+    broker = _StubBroker(
+        {"SPY": Position("SPY", 3.0, 750.0, 2250.0, 0.0)}
+    )
+    local = Portfolio(equity=100_000.0, cash=100_000.0, buying_power=100_000.0, positions={})
+    result = Reconciler(broker, halt).reconcile(
+        local, explained_tickers=frozenset({"SPY"})
+    )
+    assert result.matched is True
+    assert result.halted is False
+    assert not halt.is_halted()
+
+
+def test_unexplained_phantom_still_halts(tmp_path) -> None:
+    """explained_tickers only exempts ITS tickers — anything else fails closed."""
+    halt = HaltControl(tmp_path / "halt.flag")
+    broker = _StubBroker(
+        {
+            "SPY": Position("SPY", 3.0, 750.0, 2250.0, 0.0),
+            "TSLA": Position("TSLA", 5.0, 400.0, 2000.0, 0.0),
+        }
+    )
+    local = Portfolio(equity=100_000.0, cash=100_000.0, buying_power=100_000.0, positions={})
+    result = Reconciler(broker, halt).reconcile(
+        local, explained_tickers=frozenset({"SPY"})
+    )
+    assert result.halted is True
+    assert any("TSLA" in m for m in result.mismatches)
+    assert not any("SPY" in m for m in result.mismatches)

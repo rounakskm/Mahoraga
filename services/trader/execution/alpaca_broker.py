@@ -212,10 +212,11 @@ class AlpacaBrokerClient:
             "time_in_force": "day",
         }
         if order.limit_price is not None:
-            body["limit_price"] = str(order.limit_price)
+            body["limit_price"] = f"{order.limit_price:.2f}"
         if order.stop_price is not None and order.side is Side.BUY:
+            # Alpaca rejects sub-penny prices (42210000) — round to the cent.
             body["order_class"] = "oto"
-            body["stop_loss"] = {"stop_price": str(order.stop_price)}
+            body["stop_loss"] = {"stop_price": f"{order.stop_price:.2f}"}
         return body
 
     def daily_pl_pct(self) -> float | None:
@@ -258,6 +259,11 @@ class AlpacaBrokerClient:
         resp = httpx.post(
             f"{self.endpoint}{path}", headers=self._headers(), json=body, timeout=30
         )
+        if resp.status_code >= 400:
+            # Surface the broker's rejection reason — a bare 422 is undiagnosable.
+            logger.error(
+                "Alpaca %s %s -> %s: %s", path, body, resp.status_code, resp.text
+            )
         resp.raise_for_status()
         return resp.json()
 
