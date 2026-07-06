@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mahoraga paper-window LaunchAgent — fires scripts/paper_window.sh twice a day:
+    07:35 local -> signal-driven live-paper cycle (the script no-ops on Sat/Sun;
+                   launchd StartCalendarInterval cannot filter weekdays per entry)
+    13:15 local -> end-of-day P&L + position snapshot recording
+
+  Install:   cp infra/ops/com.mahoraga.paper-window.plist ~/Library/LaunchAgents/
+             launchctl load ~/Library/LaunchAgents/com.mahoraga.paper-window.plist
+  Uninstall: launchctl unload ~/Library/LaunchAgents/com.mahoraga.paper-window.plist
+  See docs/runbooks/paper-window.md for the full runbook.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mahoraga.paper-window</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/rounakskm/AI-projects/Mahoraga/scripts/paper_window.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>7</integer>
+            <key>Minute</key>
+            <integer>35</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>13</integer>
+            <key>Minute</key>
+            <integer>15</integer>
+        </dict>
+    </array>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/rounakskm/AI-projects/Mahoraga/data/logs/paper_window.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/rounakskm/AI-projects/Mahoraga/data/logs/paper_window.log</string>
+</dict>
+</plist>
