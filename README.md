@@ -1,90 +1,176 @@
 # Mahoraga
 
-Self-improving regime-aware autonomous trading system. See [`CLAUDE.md`](CLAUDE.md) for project context and architectural decisions, [`docs/superpowers/specs/`](docs/superpowers/specs/) for the navigable spec map.
+Self-improving, regime-aware autonomous trading system for US equities/ETFs. It detects
+market regimes (MACRO/MESO/MICRO), trains regime-conditional strategies through an
+anti-overfitting fortress on real SPY history, reads live news sentiment, and executes
+through a hard-limit firewall against an Alpaca **paper** account. Real capital is gated
+behind a fail-closed convergence report **and** an explicit human sign-off — always.
 
-## Prerequisites
+Project context and architecture: [`CLAUDE.md`](CLAUDE.md) · spec map:
+[`docs/superpowers/specs/`](docs/superpowers/specs/) · live status:
+[`docs/PROGRESS.md`](docs/PROGRESS.md)
 
-- Apple Silicon Mac with macOS 14+ (also runs on Linux/WSL2 with caveats)
-- Docker Desktop or Colima
-- Python 3.11+ with `pip`
-- Node.js 22.16+ (for NemoClaw CLI)
-- [Ollama](https://ollama.ai) installed on host (Metal acceleration; not containerized)
-- Git 2.40+ (for `git subtree`)
+**Status:** Phases 1–6 complete. The 30-day paper-trading window is live (zero real capital).
 
-## Quick start
+---
+
+## 1. Setup
+
+### Prerequisites
+
+| Needed for | Requirement |
+|---|---|
+| Everything | Python 3.11+, [`uv`](https://docs.astral.sh/uv/) (`brew install uv`), Git 2.40+ |
+| Postgres (trade store, provenance, audit) | Docker Desktop or Colima |
+| Hermes agent fleet substrate (optional — training runs without it) | Node.js 22.16+, [Ollama](https://ollama.ai) on host |
+
+### API keys
+
+Copy the template, then fill in keys. **`.env` is git-ignored — secrets never leave your machine.**
 
 ```bash
-# 1. Configure environment
 cp .env.example .env
-# Fill in ANTHROPIC_API_KEY, POSTGRES_PASSWORD, LITELLM_MASTER_KEY, OLLAMA_MODEL,
-# and (when ready) TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-make env-check
-
-# 2. Pull a local Gemma 4 model on host (Metal acceleration)
-ollama pull gemma4:26b
-ollama pull gemma4:e4b      # fallback
-
-# 3. Bring up the sidecars (Postgres + LiteLLM)
-make up
-
-# 4. Install NemoClaw CLI from the vendored tree
-cd vendor/nemoclaw
-npm install && npm link
-cd ../..
-
-# 5. Onboard the OpenClaw-in-NemoClaw sandbox
-./scripts/onboard.sh
-
-# 6. Run tests
-make test                                                 # unit tests
-pytest tests/integration/phase-0 -m integration -v        # integration smoke (requires sandbox up)
-
-# 7. Measure local LLM throughput (records a row in docs/measurements/)
-make measure-llm
-
-# 8. Tear down
-make down
 ```
 
-## Start an autoresearch training run (Phase 3)
+| Key | Get it at | Needed for |
+|---|---|---|
+| `ALPACA_API_KEY` + `ALPACA_SECRET_KEY` | [alpaca.markets](https://alpaca.markets) (free; create a **paper** account) | News archive (Phase 4), paper trading (Phase 5). The single most important pair. |
+| `POSTGRES_PASSWORD` | choose one | Trade store, provenance, audit chain |
+| `MAHORAGA_DSN` | `postgresql://postgres:<POSTGRES_PASSWORD>@localhost:5432/postgres` | Same (the connection string the scripts read) |
+| `NVIDIA_API_KEY` | [build.nvidia.com](https://build.nvidia.com) (free tier) | LLM-driven training mutations (`--llm`) |
+| `FRED_API_KEY` | [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html) (free, instant) | CPI/NFP release blackout in the execution firewall (FOMC dates work without it) |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | @BotFather on Telegram | Optional: `/halt` `/status` operator commands |
+| `ANTHROPIC_API_KEY` etc. | — | Optional: extra LLM providers via LiteLLM |
 
-The self-improving loop is runnable today (Layer 1 — mechanical, no LLM, no
-Postgres, no network; pure Python on real SPY):
+Everything degrades gracefully: a missing key disables that feature with a logged
+warning instead of crashing.
+
+### Bring up the stack and load market data
 
 ```bash
+# Postgres (schemas auto-apply on first init)
+docker compose up -d postgres
+
+# ~10 years of real SPY daily OHLCV -> data/parquet/ohlcv/SPY/
 uv sync
-uv run python scripts/run_autoresearch.py --iterations 50
+uv run python scripts/pull_spy_daily.py
+
+# sanity: full test suite (fast, offline; DSN-gated tests skip without Postgres env)
+uv run --with pytest python -m pytest services/trader -q
 ```
 
-It mutates a **regime-conditional** strategy, scores each candidate through the
-Phase-2 anti-overfitting fortress, and keeps the best *promoted* one — streaming
-progress live and writing every iteration to `data/autoresearch/<run>.csv` (watch
-it with `tail -f` from another terminal). Full steps + how to read the results:
-[`docs/runbooks/autoresearch-training.md`](docs/runbooks/autoresearch-training.md).
+Optional (for the seven-role Hermes fleet + Hindsight memory): `docker compose up -d`
+brings up LiteLLM + Hindsight too; the NemoClaw/Hermes sandbox setup is in
+[`infra/nemoclaw/`](infra/nemoclaw/) and `scripts/onboard.sh`.
+
+---
+
+## 2. Start training
+
+The autoresearch loop mutates a **regime-conditional** strategy (per-regime SMA windows
++ learnable regime-detector thresholds), scores every candidate through the Phase-2
+anti-overfitting fortress (PBO/DSR walls + gates), and only promotes survivors that also
+hold on an untouched 6-month vault. Results stream live to `data/autoresearch/<run>.csv`.
+
+```bash
+# Mechanical hill-climb (no LLM, no network — the baseline)
+uv run python scripts/run_autoresearch.py --iterations 50
+
+# LLM-proposed mutations (Nemotron via NVIDIA_API_KEY), detector learnable too
+uv run python scripts/run_autoresearch.py --iterations 50 --llm --learn-detector
+
+# The seven-role fleet (Planner->Reviewer->Hunter->Guardian->Archivist), one nightly cadence
+uv run python scripts/run_autoresearch.py --fleet --cadence nightly --iterations 10
+
+# Compressed-history replay: "experience" ~5 years of regimes, PIT-clamped, never
+# touching the vault (the system's core thesis)
+uv run python scripts/run_autoresearch.py --fleet --cadence replay --iterations 3
+```
+
+Promoted, vault-holding strategies land in `strategies/<run>.json` (and
+`strategies.registry` when Postgres is up) — these artifacts are what paper trading
+executes. Runbook: [`docs/runbooks/autoresearch-training.md`](docs/runbooks/autoresearch-training.md).
+
+## 3. News + sentiment intelligence
+
+```bash
+# Ingest + classify real SPY news (CRITICAL/MATERIAL/BACKGROUND + sentiment)
+uv run python scripts/run_intel.py ingest --symbols SPY --start 2024-01-01
+
+# The real point-in-time sentiment feature over a date range
+uv run python scripts/run_intel.py sentiment --symbol SPY --start 2024-03-01 --end 2024-03-15
+
+# Weekly macro brief (FRED / SEC EDGAR / Fed RSS synthesis)
+uv run python scripts/run_intel.py brief
+```
+
+## 4. Paper trading (zero real capital)
+
+Everything is **dry-run by default**. A live paper order requires the explicit
+`--live-orders` flag, a real market quote, and passes halt-check → hard-limit firewall
+(5% position / 20% sector / 2% daily loss / regime confidence / FOMC-CPI-NFP blackout /
+2×ATR stop) → PDT+wash-sale compliance before it can reach Alpaca.
+
+```bash
+# Read-only: your paper account + positions
+uv run python scripts/run_paper.py account
+uv run python scripts/run_paper.py positions
+
+# One signal-driven cycle, DRY-RUN (nothing submitted)
+uv run python scripts/run_paper.py cycle --strategy strategies/seed4-1782849823.json --signal
+
+# The same cycle, LIVE against the paper account (prints a warning banner)
+uv run python scripts/run_paper.py cycle --strategy strategies/seed4-1782849823.json --signal --live-orders
+
+# End-of-day: record daily P&L + position snapshot (feeds the convergence report)
+uv run python scripts/run_paper.py eod
+```
+
+**The 30-day window, hands-off:** install the launchd agent (cycle 7:35am PT weekdays,
+EOD 1:15pm PT) — deliberately a human step:
+
+```bash
+cp infra/ops/com.mahoraga.paper-window.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.mahoraga.paper-window.plist
+```
+
+Runbook (disable, logs, halt options): [`docs/runbooks/paper-window.md`](docs/runbooks/paper-window.md).
+
+## 5. Monitor and control
+
+```bash
+# Operator dashboard: positions, orders, P&L, fleet activity, HALT/RESUME buttons
+uv run --with streamlit streamlit run scripts/dashboard.py
+
+# The go/no-go gate for real capital (fail-closed: unmeasured = NOT READY)
+uv run python scripts/convergence_report.py --date $(date +%F)
+```
+
+**Kill switch (<10s, halts every cycle):** the dashboard HALT button, Telegram `/halt`,
+or `touch data/control/halt.flag`. Resume via the dashboard, `/resume`, or deleting the flag.
+
+**The line that never moves:** paper trading needs `--live-orders`; **real capital
+needs a passing convergence report (≥30 paper days, Sharpe >1.0, replay ≥3yr, all
+regimes covered) *and* an explicit human sign-off.** The report can't pass vacuously —
+anything unmeasured fails.
+
+---
 
 ## Project layout
 
-See [`CLAUDE.md`](CLAUDE.md) "Repo topology" for the canonical map. Brief overview:
+- `services/trader/` — all domain code (substrate-portable, plain Python): `data` `features` `regime` `walls` `gates` `backtest` `training` `news` `intel` `execution` `ops`
+- `scripts/` — the operator entry points used above
+- `infra/` — Postgres migrations, NemoClaw/Hermes config + subagent defs, CI guards, launchd
+- `vendor/` — NemoClaw (subtree), tradingagents (subtree), Hindsight (subtree), autoresearch (frozen), multiautoresearch (frozen reference)
+- `docs/` — project plan, specs (`superpowers/specs/`), runbooks, PROGRESS, convergence reports
 
-- `services/` — Python services (Phase 1+); per-role with own `Dockerfile` and `pyproject.toml`
-- `vendor/nemoclaw/` — NVIDIA NemoClaw substrate, vendored as `git subtree` (currently `v0.0.27`)
-- `vendor/autoresearch/` — karpathy/autoresearch, frozen one-time copy
-- `infra/nemoclaw/` — blueprint + policies + subagent definitions (Hunter / Guardian / Archivist)
-- `infra/litellm/` — LiteLLM gateway config
-- `infra/postgres/migrations/` — Postgres + pgvector schemas (knowledge / trades / experiments / strategies / audit)
-- `docs/` — project plan, specs, measurements, research notes
-
-## Architecture in one paragraph
-
-One always-on OpenClaw assistant runs inside one NemoClaw-hardened OpenShell sandbox. Hunter, Guardian, and Archivist are OpenClaw subagents — each in its own context window but sharing tools (vectorbt, Postgres KB, regime detector, LiteLLM gateway) and the audit log. The autoresearch loop is a tool the main assistant invokes nightly. LiteLLM provides multi-provider routing (Ollama-local Gemma 4 primary, plus Anthropic / Gemini / OpenRouter / OpenAI / Grok cloud). See [`docs/superpowers/specs/2026-04-26-architecture-revision-consolidated-assistant.md`](docs/superpowers/specs/2026-04-26-architecture-revision-consolidated-assistant.md) for the full picture.
-
-## Updating NemoClaw upstream
+## Updating vendored upstreams
 
 ```bash
 git fetch nemoclaw-upstream
 git subtree pull --prefix=vendor/nemoclaw nemoclaw-upstream <new-tag> --squash
-make test                                                 # full smoke
-git push                                                  # PR for review
+uv run --with pytest python -m pytest services/trader -q
 ```
 
-Routine pulls monthly; security advisories within 72h. See [`vendor/nemoclaw/MAHORAGA_CHANGES.md`](vendor/nemoclaw/MAHORAGA_CHANGES.md) for vendoring history and [architecture spec §9 OQ 1](docs/superpowers/specs/2026-04-25-mahoraga-architecture-decomposition.md) for the abandonment-contingency plan.
+Routine pulls monthly; security advisories within 72h. History:
+[`vendor/nemoclaw/MAHORAGA_CHANGES.md`](vendor/nemoclaw/MAHORAGA_CHANGES.md).
