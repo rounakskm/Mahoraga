@@ -173,6 +173,24 @@ post-snapshot orders (no false halt when the overnight entry fills at the open).
 Daily cadence: `scripts/paper_window.sh` + `infra/ops/com.mahoraga.paper-window.plist`
 ([runbook](runbooks/paper-window.md)) — the launchd install is the operator's step.
 
+## Paper-window ops follow-ups ✅ (Tier 1, 2026-07-13)
+
+Three gaps found in the post-Phase-6 review of "what still can't happen":
+- **Paper-stats bridge** (`ops/paper_stats.py`) — `trades.pnl_daily` → days + annualized
+  Sharpe; the convergence report now **auto-gathers** from the DSN when `--paper-stats`
+  isn't given (explicit file still wins; no source → fail-closed unmeasured).
+- **Telegram bot runner** (`scripts/run_telegram_bot.py` + `ops/bot_providers.py`) —
+  all 7 commands wired to real providers (regime + transition risk, registry lookup,
+  Hindsight KB, daily/weekly reports). Polling REFUSES to start without a
+  `TELEGRAM_CHAT_ID` allowlist (an open bot could `/resume` the kill-switch).
+  Local smoke: `uv run python scripts/run_telegram_bot.py --once /status`.
+- **Monthly P&L armed** (`TradeStore.monthly_pl_pct`) — trailing-30d baseline from
+  `pnl_daily` vs live account equity feeds the firewall; the CLAUDE.md **10% monthly
+  catastrophic halt can now actually trip** (was 0.0 + warning). Verified live against
+  the local Postgres (159/159 with DSN).
+  Bonus: a test fixture that could have deleted a REAL paper-window pnl row was
+  defused (synthetic sentinel dates + snapshot/restore).
+
 ## Current focus
 
 **Phases 1–6 code-complete; the 30-day paper window is live.** Trains on ~5yr real SPY regimes, reads real news

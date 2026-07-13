@@ -28,8 +28,12 @@ Input sources (each independently optional):
                                      over-count a thin one — which is the safe
                                      direction for a gate. Replace with a real
                                      count endpoint when upstream grows one.
-  * paper stats                    — optional `--paper-stats <json>` file with
-                                     {"days": int, "sharpe": float}.
+  * paper stats                    — explicit `--paper-stats <json>` file with
+                                     {"days": int, "sharpe": float} wins when
+                                     given; otherwise auto-gathered from
+                                     `trades.pnl_daily` via MAHORAGA_DSN
+                                     (`services.trader.ops.paper_stats`). No
+                                     file + no DSN -> unmeasured (fail-closed).
 
 `--date` is REQUIRED and there is deliberately NO datetime.now() fallback: the
 repo's replay-safe convention is that nothing on the library/report path reads
@@ -151,6 +155,26 @@ def _gather_paper_stats(path: str | None) -> tuple[int | None, float | None]:
         return None, None
 
 
+def _resolve_paper_stats(path: str | None, dsn: str | None) -> tuple[int | None, float | None]:
+    """(days, sharpe) with explicit precedence: an explicit --paper-stats file
+    always wins; else auto-gather from trades.pnl_daily when a DSN is set;
+    else (None, None) — unmeasured, fail-closed (unchanged behaviour)."""
+    if path:
+        print(f"paper stats: from --paper-stats file {path}")
+        return _gather_paper_stats(path)
+    if dsn:
+        from services.trader.ops.paper_stats import gather_paper_stats  # noqa: E402
+
+        stats = gather_paper_stats(dsn)
+        print(
+            "paper stats: auto-gathered from trades.pnl_daily via MAHORAGA_DSN "
+            f"(days={stats.days}, sharpe={stats.sharpe})"
+        )
+        return stats.days, stats.sharpe
+    print("paper stats: no --paper-stats file and no MAHORAGA_DSN; criteria will fail closed")
+    return None, None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -159,7 +183,11 @@ def main() -> int:
         help="as-of date (YYYY-MM-DD) stamped on the report; required — no "
         "datetime.now fallback (replay-safe convention)",
     )
-    parser.add_argument("--paper-stats", help='JSON file with {"days": int, "sharpe": float}')
+    parser.add_argument(
+        "--paper-stats",
+        help='JSON file with {"days": int, "sharpe": float}; wins over auto-gathering '
+        "from trades.pnl_daily (which needs MAHORAGA_DSN)",
+    )
     parser.add_argument(
         "--hindsight",
         default=os.environ.get("HINDSIGHT_URL"),
@@ -168,10 +196,11 @@ def main() -> int:
     parser.add_argument("--out", help="output path (default docs/convergence/<date>-report.md)")
     args = parser.parse_args()
 
+    dsn = os.environ.get("MAHORAGA_DSN")
     replay_years, regime_coverage = _gather_replay_and_coverage()
-    paper_days, paper_sharpe = _gather_paper_stats(args.paper_stats)
+    paper_days, paper_sharpe = _resolve_paper_stats(args.paper_stats, dsn)
     inputs = ConvergenceInputs(
-        deployment_eligible=_gather_registry(os.environ.get("MAHORAGA_DSN")),
+        deployment_eligible=_gather_registry(dsn),
         replay_years=replay_years,
         regime_coverage=regime_coverage,
         kb_facts=_gather_kb_facts(args.hindsight),
