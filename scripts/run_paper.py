@@ -15,7 +15,9 @@ dependency is absent — no Alpaca key, no network:
 - `positions` — print open positions (read-only GET). No key -> informative skip.
 - `cycle`     — run ONE execution cycle for a promoted strategy artifact through the
                 REAL production wiring: live quote from the Alpaca data API, daily P&L
-                from the broker account, `build_firewall_context` (the ONE ctx factory),
+                from the broker account, monthly P&L from the trailing-30-day
+                `trades.pnl_daily` baseline vs live equity (arms the 10% catastrophic
+                halt), `build_firewall_context` (the ONE ctx factory),
                 `HardLimitFirewall` with a live `EconCalendarGate`, `ComplianceEngine`
                 fed by `TradeStore.recent_trades`, reconciliation against the last
                 position snapshot, and order/position persistence to `trades.*`.
@@ -359,9 +361,13 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     _reconcile_if_stateful(broker, store, halt, portfolio)
 
     # C2 — REAL P&L context. Daily from the broker account (equity vs
-    # last_equity); monthly falls back to None -> 0.0 + WARNING inside
-    # `build_firewall_context` (trades.pnl_daily wiring lands with ops).
+    # last_equity); monthly from the trailing-30-day `trades.pnl_daily`
+    # baseline (recorded by `eod`) vs the live account equity — this is what
+    # arms the 10% monthly-catastrophic halt. A disabled store or an empty
+    # window yields None, which `build_firewall_context` maps to 0.0 WITH a
+    # WARNING — that warning is the signal the monthly halt cannot trip.
     daily_pl_pct = broker.daily_pl_pct()
+    monthly_pl_pct = store.monthly_pl_pct(current_equity=portfolio.equity)
 
     def ctx_for(order_intent: OrderIntent, order: Order) -> FirewallContext:
         return build_firewall_context(
@@ -372,7 +378,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
             price=price,
             atr_value=atr_value,  # real ATR(14) from the daily bars in --signal mode.
             daily_pl_pct=daily_pl_pct,
-            monthly_pl_pct=None,
+            monthly_pl_pct=monthly_pl_pct,
             sector_map=_SECTOR_MAP,
         )
 
