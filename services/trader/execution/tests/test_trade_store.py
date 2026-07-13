@@ -23,10 +23,13 @@ from services.trader.execution.model import (
     Position,
     Side,
 )
-from services.trader.execution.trade_store import TradeStore
+from services.trader.execution.trade_store import TradeStore, _pl_pct
 
 DSN = os.environ.get("MAHORAGA_DSN")
 _TEST_TICKER = "ZZTEST"
+# A synthetic pnl_daily date the LIVE paper window can never contain — the
+# fixture deletes this date unconditionally, so it must never be a real row.
+_TEST_PNL_DATE = dt.date(1999, 1, 4)
 
 
 def _sample_order() -> Order:
@@ -103,7 +106,7 @@ def store():
     )
     conn.execute("DELETE FROM trades.orders WHERE ticker = %s", (_TEST_TICKER,))
     conn.execute("DELETE FROM trades.positions WHERE ticker = %s", (_TEST_TICKER,))
-    conn.execute("DELETE FROM trades.pnl_daily WHERE d = %s", (dt.date(2026, 7, 1),))
+    conn.execute("DELETE FROM trades.pnl_daily WHERE d = %s", (_TEST_PNL_DATE,))
     s.close()
 
 
@@ -175,7 +178,7 @@ def test_snapshot_positions_round_trip(store: TradeStore) -> None:
 
 @pytest.mark.skipif(not DSN, reason="MAHORAGA_DSN not set")
 def test_record_daily_pnl_upserts(store: TradeStore) -> None:
-    d = dt.date(2026, 7, 1)
+    d = _TEST_PNL_DATE
     store.record_daily_pnl(d, 100_000.0, 500.0, 200.0)
     store.record_daily_pnl(d, 101_000.0, 600.0, 250.0)  # UPSERT — same date
 
@@ -244,6 +247,62 @@ def test_recent_trades_round_trip(store: TradeStore) -> None:
     sells = [t for t in records if t.side is Side.SELL]
     assert sells and sells[0].realized_pl < 0
     assert all(t.is_day_trade for t in records)  # same-ticker buy+sell same date
+
+
+# ---------------------------------------------------------------------------
+# Monthly P&L — feeds the 10% monthly-catastrophic halt.
+# ---------------------------------------------------------------------------
+
+
+def test_pl_pct_pure_math() -> None:
+    """The extracted return math: (end - baseline) / baseline, None on bad base."""
+    assert _pl_pct(100_000.0, 95_000.0) == pytest.approx(-0.05)
+    assert _pl_pct(100_000.0, 90_000.0) == pytest.approx(-0.10)
+    assert _pl_pct(100_000.0, 110_000.0) == pytest.approx(0.10)
+    assert _pl_pct(0.0, 95_000.0) is None
+    assert _pl_pct(-1.0, 95_000.0) is None
+
+
+def test_monthly_pl_pct_none_when_disabled() -> None:
+    """No DSN -> None (the ctx factory turns that into 0.0 + a loud WARNING)."""
+    store = TradeStore(None)
+    assert store.monthly_pl_pct() is None
+    assert store.monthly_pl_pct(current_equity=100_000.0) is None
+    assert store._conn is None
+
+
+@pytest.fixture()
+def pnl_window_rows(store: TradeStore):
+    """Insert a 30d-ago baseline (100k) + today's row (95k); restore on teardown.
+
+    The paper window is LIVE — real pnl_daily rows may already exist on these
+    dates (the UPSERT would clobber them), so pre-existing rows are snapshotted
+    and restored rather than blindly deleted.
+    """
+    conn = store._conn_for_test()
+    today = conn.execute("SELECT CURRENT_DATE").fetchone()[0]
+    baseline_d = today - dt.timedelta(days=30)  # oldest date inside the window
+    saved = conn.execute(
+        "SELECT d, equity, realized_pl, unrealized_pl FROM trades.pnl_daily "
+        "WHERE d IN (%s, %s)",
+        (baseline_d, today),
+    ).fetchall()
+    store.record_daily_pnl(baseline_d, 100_000.0, 0.0, 0.0)
+    store.record_daily_pnl(today, 95_000.0, -5_000.0, 0.0)
+    yield
+    conn.execute(
+        "DELETE FROM trades.pnl_daily WHERE d IN (%s, %s)", (baseline_d, today)
+    )
+    for d, equity, realized, unrealized in saved:
+        store.record_daily_pnl(d, equity, realized, unrealized)
+
+
+@pytest.mark.skipif(not DSN, reason="MAHORAGA_DSN not set")
+def test_monthly_pl_pct_round_trip(store: TradeStore, pnl_window_rows: None) -> None:
+    """Baseline = oldest in-window equity; endpoint = newest row (or override)."""
+    assert store.monthly_pl_pct() == pytest.approx(-0.05)
+    # Live-equity endpoint: baseline 100k vs current 90k -> the 10% halt trips.
+    assert store.monthly_pl_pct(current_equity=90_000.0) == pytest.approx(-0.10)
 
 
 @pytest.mark.skipif(not DSN, reason="MAHORAGA_DSN not set")

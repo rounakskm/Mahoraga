@@ -19,6 +19,13 @@ from services.trader.execution.compliance import TradeRecord
 from services.trader.execution.model import Order, Portfolio, Position, Side
 
 
+def _pl_pct(baseline: float, end: float) -> float | None:
+    """Fractional return `(end - baseline) / baseline`; None when baseline <= 0."""
+    if baseline <= 0:
+        return None
+    return (end - baseline) / baseline
+
+
 class TradeStore:
     """Persist orders/fills/positions/pnl to `trades.*`; no-op without a DSN."""
 
@@ -222,6 +229,49 @@ class TradeStore:
             "unrealized_pl = EXCLUDED.unrealized_pl",
             (d, equity, realized, unrealized),
         )
+
+    def monthly_pl_pct(
+        self, window_days: int = 30, *, current_equity: float | None = None
+    ) -> float | None:
+        """Trailing-`window_days` P&L fraction from `trades.pnl_daily`.
+
+        This is the monthly P&L feeding the CLAUDE.md 10% monthly-catastrophic
+        halt in the hard-limit firewall. Baseline = the OLDEST equity row
+        within the trailing window; endpoint = `current_equity` when given
+        (the live account equity mid-cycle), else the NEWEST in-window row.
+
+        Returns None when the store is disabled, the window holds no rows, or
+        the baseline equity is <= 0. Fail-safe direction: None -> 0.0 plus a
+        WARNING inside `build_firewall_context` (unchanged), so a missing
+        store degrades loudly, not silently.
+
+        `d` is a DATE column and `CURRENT_DATE - %s` (date - integer) is
+        evaluated server-side in the Postgres session's date — the filter has
+        no client/server timezone pitfalls.
+        """
+        if self.dsn is None:
+            return None
+        conn = self._get_conn()
+        oldest = conn.execute(
+            "SELECT equity FROM trades.pnl_daily "
+            "WHERE d >= CURRENT_DATE - %s ORDER BY d ASC LIMIT 1",
+            (window_days,),
+        ).fetchone()
+        if oldest is None:
+            return None
+        baseline = float(oldest[0])
+        if current_equity is not None:
+            end = float(current_equity)
+        else:
+            newest = conn.execute(
+                "SELECT equity FROM trades.pnl_daily "
+                "WHERE d >= CURRENT_DATE - %s ORDER BY d DESC LIMIT 1",
+                (window_days,),
+            ).fetchone()
+            if newest is None:  # pragma: no cover — oldest exists, so newest must
+                return None
+            end = float(newest[0])
+        return _pl_pct(baseline, end)
 
     def close(self) -> None:
         if self._conn is not None:

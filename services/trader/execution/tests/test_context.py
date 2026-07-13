@@ -141,6 +141,24 @@ def test_present_pl_does_not_warn(caplog: pytest.LogCaptureFixture) -> None:
     assert not any("P&L context missing" in r.message for r in caplog.records)
 
 
+def test_explicit_monthly_pl_reaches_context(caplog: pytest.LogCaptureFixture) -> None:
+    """A store-derived monthly P&L at the catastrophic threshold flows through
+    verbatim (no clamp, no default) and does NOT trigger the missing-P&L warning
+    — this is the value the 10% monthly halt keys on."""
+    with caplog.at_level(logging.WARNING):
+        ctx = build_firewall_context(
+            _intent(),
+            _order(),
+            _portfolio(),
+            now=NOW,
+            price=100.0,
+            daily_pl_pct=0.0,
+            monthly_pl_pct=-0.10,
+        )
+    assert ctx.monthly_pl_pct == -0.10
+    assert not any("P&L context missing" in r.message for r in caplog.records)
+
+
 def test_has_stop_and_pass_throughs() -> None:
     ctx = build_firewall_context(
         _intent(stop_price=None),
