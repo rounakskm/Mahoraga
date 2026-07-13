@@ -191,6 +191,16 @@ Three gaps found in the post-Phase-6 review of "what still can't happen":
   Bonus: a test fixture that could have deleted a REAL paper-window pnl row was
   defused (synthetic sentinel dates + snapshot/restore).
 
+## Retrain under the fixed vol scale ✅ (2026-07-13)
+
+The paper window now trades **seed11** (`strategies/seed11-1783928660.json`), retrained
+after the vol-scale unification: train Sharpe **0.0713** / vault **0.0695** (holds; vs
+seed4's 0.0535/0.0664), 70% quarterly win, and a **balanced learned detector**
+(adx≥27, vol>40.0 on the 0–100 scale — a real regime split instead of the old
+everything-is-high-vol labeling). Swap verified with a dry-run: the account's existing
+3-SPY long matched seed11's signal — book aligned, zero churn. `MAHORAGA_PAPER_STRATEGY`
+updated in `.env`.
+
 ## Current focus
 
 **Phases 1–6 code-complete; the 30-day paper window is live.** Trains on ~5yr real SPY regimes, reads real news
