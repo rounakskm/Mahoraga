@@ -22,14 +22,33 @@ surfaces `--watchlist`.
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+from types import ModuleType
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from scripts import run_paper
 from services.trader.execution.model import Order, Portfolio, Position
 from services.trader.execution.trade_store import TradeStore
 from services.trader.ops.halt import HaltControl
+
+# `scripts/` is not an importable package (no __init__, and CI installs the repo
+# as a wheel where scripts/ isn't shipped) — load run_paper.py by file path, the
+# same pattern as test_dashboard_smoke.py.
+_RUN_PAPER_PATH = Path(__file__).resolve().parents[3] / "scripts" / "run_paper.py"
+
+
+def _load_run_paper() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("run_paper_undertest", _RUN_PAPER_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+run_paper = _load_run_paper()
 from services.trader.training.regime import detector_features
 
 # ---------------------------------------------------------------------------
