@@ -63,11 +63,20 @@ class HindsightClient:
 
     # --- public surface -----------------------------------------------------
 
-    def retain(self, text: str, metadata: dict | None = None) -> str | None:
+    def retain(
+        self, text: str, metadata: dict | None = None, *, async_write: bool = True
+    ) -> str | None:
         """Store an Experience Fact. Returns a non-None marker (the operation id
         when the server hands one back, else "ok") on success; None when
         disabled/unreachable. Metadata values are coerced to strings (the API's
-        `metadata: dict[str, str]` schema)."""
+        `metadata: dict[str, str]` schema).
+
+        `async_write=True` (default) submits and returns immediately (~30ms) while
+        Hindsight's worker pool extracts + indexes in the background — memory is
+        best-effort and MUST NOT block the training loop on a ~18s synchronous
+        extraction. Fire-and-forget is the right contract for the fleet; pass
+        `async_write=False` only when a caller must confirm the fact is recallable
+        before proceeding (e.g. a test or a one-off backfill it then verifies)."""
         if not self.is_enabled():
             return None
         item: dict = {"content": text}
@@ -75,7 +84,8 @@ class HindsightClient:
             item["metadata"] = {k: str(v) for k, v in metadata.items()}
         try:
             resp = self._post(
-                f"/v1/default/banks/{self.bank}/memories", {"items": [item]}
+                f"/v1/default/banks/{self.bank}/memories",
+                {"items": [item], "async": async_write},
             )
         except Exception as exc:  # network / HTTP / parse error -> never stall
             self._warn_once("retain", exc)
