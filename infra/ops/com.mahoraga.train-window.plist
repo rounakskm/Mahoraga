@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.mahoraga.train-window</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/rounakskm/AI-projects/Mahoraga/scripts/train_window.sh</string>
+  </array>
+  <!-- Weekly: Sunday (weekday 0) at 02:00 local — a fresh training campaign that
+       fills the registry + memory before the trading week. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>0</integer>
+    <key>Hour</key><integer>2</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/rounakskm/AI-projects/Mahoraga/data/logs/train_window.launchd.log</string>
+  <key>StandardErrorPath</key><string>/Users/rounakskm/AI-projects/Mahoraga/data/logs/train_window.launchd.log</string>
+</dict>
+</plist>

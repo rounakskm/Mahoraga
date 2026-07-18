@@ -35,8 +35,11 @@ LOG="data/logs/paper_window.log"
             uv run python scripts/run_intel.py refresh --symbols SPY QQQ IWM || true
             # 2) the multi-symbol signal-driven live-paper cycle over the watchlist;
             #    each symbol passes the portfolio-wide firewall independently.
+            #    --from-registry auto-adopts the best vault-validated strategy the
+            #    training cadence has promoted (the train->deploy handoff), so a
+            #    freshly-trained winner flows to paper with no manual re-pin.
             uv run python scripts/run_paper.py cycle \
-                --strategy "${MAHORAGA_PAPER_STRATEGY:-strategies/seed11-1783928660.json}" \
+                --from-registry \
                 --signal \
                 --watchlist \
                 --live-orders
