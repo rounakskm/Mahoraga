@@ -236,6 +236,34 @@ coverage.
 
 Everything buildable is built. The app is feature-complete and usable today.
 
+## The conductor + working memory ✅ (2026-07-18)
+
+Two gaps that stood between "two scripts you run" and "a system that trains itself,
+remembers, and deploys the winner" — both closed:
+
+**Memory actually works now.** Hindsight was connected but silently accumulating ZERO
+recallable knowledge (`retain` returned ok, nothing extracted). Three real bugs fixed
+(PR: reasoning-model extraction → use instruct gemma4; client timeout 5s→60s; terse
+retain text → natural-language sentences). Proven end-to-end: a `--fleet --hindsight`
+run then recalled its OWN promoted candidates. The "learns on the way" thesis is real —
+requires Hindsight + LiteLLM + **Ollama serving** (gemma4) up.
+
+**The conductor joins train → deploy.**
+- **Auto-adopt** — `run_paper.py cycle --from-registry` selects the best *vault-validated*
+  strategy from `strategies.registry` (deployment_eligible, best vault Sharpe — NOT
+  `strategies.master`, which tracks best-fitness-promoted) and deploys it, audit-logging
+  the handoff when it changes. Verified live: adopted `2fe58a…` (vault 0.069) automatically.
+  The paper cadence (`paper_window.sh`) now uses `--from-registry` — a freshly-trained
+  winner flows to paper with no manual re-pin.
+- **Training cadence** — `scripts/train_window.sh` + `infra/ops/com.mahoraga.train-window.plist`
+  (weekly): runs the fleet WITH memory, promoting winners to the registry + accumulating
+  Hindsight facts. Install alongside the paper cadence.
+
+**This is the self-running loop:** weekly training fills the back pocket + memory → the
+daily paper cadence auto-adopts the best vault-holder → performance accumulates → the
+convergence report reads it. What's left is not code: elapsed paper days + the human
+real-capital sign-off.
+
 ## Current focus
 
 **Phases 1–6 code-complete; the 30-day paper window is live.** Trains on ~5yr real SPY regimes, reads real news
