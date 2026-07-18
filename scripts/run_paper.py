@@ -56,13 +56,19 @@ from services.trader.execution.alpaca_broker import AlpacaBrokerClient
 from services.trader.execution.calendar_gate import EconCalendarGate
 from services.trader.execution.compliance import ComplianceEngine
 from services.trader.execution.context import build_firewall_context
-from services.trader.execution.executor import Executor
+from services.trader.execution.executor import CtxBuilder, CycleReport, Executor
 from services.trader.execution.firewall import FirewallContext, HardLimitFirewall
 from services.trader.execution.model import Order, OrderIntent, Portfolio, Side
 from services.trader.execution.reconcile import Reconciler
 from services.trader.execution.signal import compute_signal, intent_from_signal
 from services.trader.execution.stops import atr as compute_atr
 from services.trader.execution.trade_store import TradeStore
+from services.trader.execution.watchlist import (
+    DEFAULT_WATCHLIST,
+    intents_for,
+    sector_for,
+    signals_for,
+)
 from services.trader.ops.halt import HaltControl
 
 logger = logging.getLogger("run_paper")
@@ -283,6 +289,187 @@ def _reconcile_if_stateful(
         print(f"  mismatch: {m}")
 
 
+def _run_executor(
+    intents: list[OrderIntent],
+    portfolio: Portfolio,
+    prices: dict[str, float],
+    ctx_for: CtxBuilder,
+    broker: AlpacaBrokerClient,
+    store: TradeStore,
+    halt: HaltControl,
+    *,
+    live_orders: bool,
+) -> CycleReport:
+    """The shared safety-critical flow: reconcile -> executor -> snapshot -> close.
+
+    Identical for the single-symbol and multi-symbol paths — reconcile the
+    persisted book against the broker (C7), run ONE firewall/compliance-gated
+    `Executor.run_cycle`, persist the post-cycle snapshot, and close the store.
+    Returns the `CycleReport` (both callers print their own summary around it).
+    """
+    # C7 — reconcile the persisted book against the broker BEFORE trading.
+    _reconcile_if_stateful(broker, store, halt, portfolio)
+
+    executor = Executor(
+        broker=broker,
+        firewall=HardLimitFirewall(calendar_gate=_calendar_gate()),
+        compliance=ComplianceEngine(),
+        halt=halt,
+        live_orders=live_orders,
+        recent_trades=store.recent_trades,  # C3 — compliance sees real history.
+        on_submit=lambda submitted_intent, returned_order: store.record_order(
+            returned_order, reason=submitted_intent.reason
+        ),
+        # Alpaca rejects fractional qty on OTO/bracket orders -> whole shares.
+        allow_fractional=False,
+    )
+    report = executor.run_cycle(intents, portfolio, prices=prices, ctx_for=ctx_for)
+
+    # C7 — persist the post-cycle position snapshot (no-op when disabled).
+    if broker.is_enabled():
+        store.snapshot_positions(broker.account())
+    store.close()
+    return report
+
+
+def run_watchlist_cycle(
+    artifact: dict,
+    symbols: list[str],
+    broker: AlpacaBrokerClient,
+    store: TradeStore,
+    halt: HaltControl,
+    *,
+    live_orders: bool,
+    bars_by_symbol: dict[str, pd.DataFrame],
+    prices: dict[str, float],
+    weight: float = 0.03,
+) -> CycleReport:
+    """Run ONE portfolio-wide execution cycle over a watchlist (pure — no I/O).
+
+    The runner (`cmd_cycle --watchlist`) gathers `bars_by_symbol` and `prices`
+    from the network and hands them here; this helper owns the deterministic
+    part so it is unit-testable offline. Every Phase-5 safety property is
+    preserved: it fans the real regime-conditional signal over the watchlist,
+    then runs ONE `Executor.run_cycle` against the single shared `Portfolio`, so
+    the firewall aggregates the 5% position / 20% sector caps portfolio-wide.
+
+    `ctx_for` sets `sector=sector_for(intent.ticker)` and derives `order_notional`
+    from the intent's UN-clamped target weight (via `build_firewall_context`), so
+    the firewall judges the strategy's true requested exposure per symbol.
+    """
+    portfolio = (
+        broker.account()
+        if broker.is_enabled()
+        else Portfolio(equity=100_000.0, cash=100_000.0, buying_power=100_000.0, positions={})
+    )
+
+    # Per-symbol signals (undecidable / warmup-only symbols are dropped) and the
+    # matching per-symbol ATR(14) — used both for the stop and the firewall's
+    # 2xATR stop-distance check.
+    signals = signals_for(artifact, bars_by_symbol)
+    atr_by_symbol: dict[str, float | None] = {}
+    for symbol, bars in bars_by_symbol.items():
+        last_atr = compute_atr(bars).iloc[-1]
+        atr_by_symbol[symbol] = float(last_atr) if pd.notna(last_atr) else None
+    intents = intents_for(signals, portfolio, prices, atr_by_symbol, weight=weight)
+
+    now = pd.Timestamp.now(tz="UTC")
+    daily_pl_pct = broker.daily_pl_pct()
+    monthly_pl_pct = store.monthly_pl_pct(current_equity=portfolio.equity)
+    sector_map = {sym: sector_for(sym) for sym in symbols}
+
+    def ctx_for(order_intent: OrderIntent, order: Order) -> FirewallContext:
+        return build_firewall_context(
+            order_intent,
+            order,
+            portfolio,
+            now=now,
+            price=prices[order_intent.ticker],
+            atr_value=atr_by_symbol.get(order_intent.ticker),
+            daily_pl_pct=daily_pl_pct,
+            monthly_pl_pct=monthly_pl_pct,
+            sector_map=sector_map,
+        )
+
+    report = _run_executor(
+        intents, portfolio, prices, ctx_for, broker, store, halt, live_orders=live_orders
+    )
+
+    for symbol, sig in sorted(signals.items()):
+        print(
+            f"signal {symbol}: regime={sig.regime} want_long={sig.want_long} "
+            f"close={sig.close:.2f} sma={sig.sma:.2f} confidence={sig.confidence:.2f}"
+        )
+    return report
+
+
+def _cmd_cycle_watchlist(args: argparse.Namespace, artifact: dict, path: Path) -> int:
+    """Multi-symbol cycle: gather bars/prices over `DEFAULT_WATCHLIST`, then run.
+
+    Fetches ~450 daily bars + a latest-trade quote per watchlist symbol (each
+    graceful-offline: symbols with no bars or no quote are skipped with a log),
+    then delegates to the pure `run_watchlist_cycle`. Dry-run default; live
+    orders still require a per-symbol quote (a symbol with no quote is dropped,
+    never sized off a fallback price).
+    """
+    live_orders = bool(args.live_orders)
+
+    bars_by_symbol: dict[str, pd.DataFrame] = {}
+    prices: dict[str, float] = {}
+    for symbol in DEFAULT_WATCHLIST:
+        bars = _daily_bars(symbol)
+        if bars is None:
+            print(f"watchlist {symbol}: no daily bars (no key / fetch failed) — skipped")
+            continue
+        quote = _latest_trade_price(symbol)
+        if quote is None:
+            print(f"watchlist {symbol}: no market quote — skipped (cannot size live)")
+            continue
+        bars_by_symbol[symbol] = bars
+        prices[symbol] = quote
+
+    if not bars_by_symbol:
+        print("watchlist: no symbols with both bars and a quote — no orders this cycle")
+
+    if live_orders and bars_by_symbol:
+        print("=" * 64)
+        print("\033[1m⚠️  LIVE PAPER ORDERS ENABLED — submitting to Alpaca paper account\033[0m")
+        print("=" * 64)
+
+    broker = _broker()
+    store = TradeStore(os.environ.get("MAHORAGA_DSN"))
+    halt = HaltControl()  # C8 — the DEFAULT repo-wide kill-switch flag.
+
+    report = run_watchlist_cycle(
+        artifact,
+        list(bars_by_symbol),
+        broker,
+        store,
+        halt,
+        live_orders=live_orders,
+        bars_by_symbol=bars_by_symbol,
+        prices=prices,
+        weight=args.weight,
+    )
+
+    mode = "LIVE PAPER" if live_orders else "dry-run"
+    keyed = "enabled" if broker.is_enabled() else "disabled (no key)"
+    stored = "enabled" if store.is_enabled() else "disabled (no MAHORAGA_DSN)"
+    print(
+        f"strategy {artifact.get('run_id', path.stem)} — {mode} watchlist cycle "
+        f"on {len(bars_by_symbol)} symbol(s): {', '.join(bars_by_symbol) or '-'}"
+    )
+    print(f"broker: {keyed}")
+    print(f"store:  {stored}")
+    print(
+        f"CycleReport(intents={report.intents}, submitted={report.submitted}, "
+        f"rejected={report.rejected}, errors={report.errors}, halted={report.halted})"
+    )
+    for r in report.rejections:
+        print(f"  rejected: {r}")
+    return 0
+
+
 def cmd_cycle(args: argparse.Namespace) -> int:
     """Run ONE execution cycle for a strategy artifact; print the CycleReport."""
     path = Path(args.strategy)
@@ -290,6 +477,9 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         print(f"strategy artifact not found: {path}; nothing to run")
         return 0
     artifact = _load_artifact(path)
+
+    if args.watchlist:
+        return _cmd_cycle_watchlist(args, artifact, path)
 
     symbol = "SPY"
     live_orders = bool(args.live_orders)
@@ -357,9 +547,6 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     else:
         intents.append(_illustrative_intent(symbol, price))
 
-    # C7 — reconcile the persisted book against the broker BEFORE trading.
-    _reconcile_if_stateful(broker, store, halt, portfolio)
-
     # C2 — REAL P&L context. Daily from the broker account (equity vs
     # last_equity); monthly from the trailing-30-day `trades.pnl_daily`
     # baseline (recorded by `eod`) vs the live account equity — this is what
@@ -382,27 +569,10 @@ def cmd_cycle(args: argparse.Namespace) -> int:
             sector_map=_SECTOR_MAP,
         )
 
-    executor = Executor(
-        broker=broker,
-        firewall=HardLimitFirewall(calendar_gate=_calendar_gate()),
-        compliance=ComplianceEngine(),
-        halt=halt,
+    report = _run_executor(
+        intents, portfolio, {symbol: price}, ctx_for, broker, store, halt,
         live_orders=live_orders,
-        recent_trades=store.recent_trades,  # C3 — compliance sees real history.
-        on_submit=lambda submitted_intent, returned_order: store.record_order(
-            returned_order, reason=submitted_intent.reason
-        ),
-        # Alpaca rejects fractional qty on OTO/bracket orders -> whole shares.
-        allow_fractional=False,
     )
-    report = executor.run_cycle(
-        intents, portfolio, prices={symbol: price}, ctx_for=ctx_for
-    )
-
-    # C7 — persist the post-cycle position snapshot (no-op when disabled).
-    if broker.is_enabled():
-        store.snapshot_positions(broker.account())
-    store.close()
 
     mode = "LIVE PAPER" if live_orders else "dry-run"
     keyed = "enabled" if broker.is_enabled() else "disabled (no key)"
@@ -468,6 +638,13 @@ def cmd_eod(args: argparse.Namespace) -> int:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    ap = _build_parser()
+    args = ap.parse_args()
+    return int(args.func(args))
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser (extracted so tests can introspect it in-process)."""
     ap = argparse.ArgumentParser(
         description="Phase-5 paper-trading runner (graceful-offline, dry-run default)"
     )
@@ -512,6 +689,17 @@ def main() -> int:
         help="entry target weight for --signal BUY entries (default 0.03; the "
         "firewall still enforces the 5%% position cap)",
     )
+    p_cycle.add_argument(
+        "--watchlist",
+        action="store_true",
+        default=False,
+        help="run a PORTFOLIO-WIDE cycle over DEFAULT_WATCHLIST (multi-symbol): "
+        "fan the real regime-conditional signal over every watchlist symbol and "
+        "run ONE Executor.run_cycle against the shared portfolio, so the 5%% "
+        "position / 20%% sector caps aggregate portfolio-wide. Same safety as the "
+        "single-symbol path (dry-run default; --live-orders + a per-symbol quote "
+        "required)",
+    )
     p_cycle.set_defaults(func=cmd_cycle)
 
     p_eod = sub.add_parser(
@@ -519,8 +707,7 @@ def main() -> int:
     )
     p_eod.set_defaults(func=cmd_eod)
 
-    args = ap.parse_args()
-    return int(args.func(args))
+    return ap
 
 
 if __name__ == "__main__":
