@@ -5,11 +5,18 @@ Three subcommands, each degrading to a clear no-op skip (exit 0) when its
 external dependency is absent — no Alpaca key, no Hindsight URL, no network:
 
     uv run python scripts/run_intel.py ingest --symbols SPY --start 2024-01-01
+    uv run python scripts/run_intel.py refresh --symbols SPY QQQ --since-min 20
     uv run python scripts/run_intel.py brief
     uv run python scripts/run_intel.py sentiment --symbol SPY --start 2024-01-01 --end 2024-02-01
 
 - `ingest`    — fetch the Alpaca news archive, classify + aggregate, optionally
                 retain World Facts to Hindsight; prints classified counts by level.
+- `refresh`   — one live REST pass over the last `--since-min` minutes: fetch +
+                classify + aggregate (writes World Facts) + snapshot per-symbol
+                sentiment. Invoked periodically (launchd), this REST cadence IS the
+                Phase-4 "sentiment every 15 min" exit criterion.
+                # ponytail: a held-open news websocket is a cloud-phase optimization;
+                # periodic REST gives the same effect for a local operator.
 - `brief`     — pull the T3 macro connectors, synthesize a weekly `MacroBrief`
                 (deterministic template offline), print its narrative.
 - `sentiment` — compute the PIT `SentimentFeature` for a ticker over a date range
@@ -39,6 +46,7 @@ from services.trader.intel.web_research import WebResearcher
 from services.trader.news.aggregator import SentimentAggregator
 from services.trader.news.alpaca_news import AlpacaNewsClient
 from services.trader.news.classifier import NewsClassifier
+from services.trader.news.refresh import refresh_once
 from services.trader.training.hindsight_client import HindsightClient
 
 
@@ -77,6 +85,31 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     print(f"hindsight (World Facts): {mem}")
     for level in ("CRITICAL", "MATERIAL", "BACKGROUND"):
         print(f"  {level:<10} {counts.get(level, 0)}")
+    return 0
+
+
+def cmd_refresh(args: argparse.Namespace) -> int:
+    """One live REST refresh pass. No key -> informative skip, exit 0."""
+    client = _alpaca_client()
+    if not client.is_enabled():
+        print("Alpaca key not set; nothing to refresh")
+        return 0
+
+    hindsight = _hindsight()
+    aggregator = SentimentAggregator(hindsight=hindsight if hindsight.is_enabled() else None)
+    since = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=args.since_min)
+
+    result = refresh_once(client, NewsClassifier(), aggregator, args.symbols, since=since)
+
+    counts = result["counts"]
+    total = sum(counts.values())
+    mem = "enabled" if hindsight.is_enabled() else "disabled"
+    print(f"refreshed {total} items for {' '.join(args.symbols)} (last {args.since_min} min)")
+    print(f"hindsight (World Facts): {mem}")
+    for level in ("CRITICAL", "MATERIAL", "BACKGROUND"):
+        print(f"  {level:<10} {counts.get(level, 0)}")
+    for symbol, state in result["states"].items():
+        print(f"  {symbol:<6} score={state.score:+.3f} n={state.n}")
     return 0
 
 
@@ -147,6 +180,13 @@ def main() -> int:
     p_ingest.add_argument("--start", required=True, help="ISO date YYYY-MM-DD")
     p_ingest.add_argument("--end", default=None, help="ISO date (default: today)")
     p_ingest.set_defaults(func=cmd_ingest)
+
+    p_refresh = sub.add_parser("refresh", help="one live REST refresh pass (periodic cadence)")
+    p_refresh.add_argument("--symbols", nargs="+", default=["SPY"], help="symbols to refresh")
+    p_refresh.add_argument(
+        "--since-min", type=int, default=20, help="lookback window in minutes (default 20)"
+    )
+    p_refresh.set_defaults(func=cmd_refresh)
 
     p_brief = sub.add_parser("brief", help="synthesize + print the weekly macro brief")
     p_brief.add_argument("--asof", default=None, help="ISO date (default: now)")
