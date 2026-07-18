@@ -33,6 +33,7 @@ import pytest
 from services.trader.execution.model import Order, Portfolio, Position
 from services.trader.execution.trade_store import TradeStore
 from services.trader.ops.halt import HaltControl
+from services.trader.training.regime import detector_features
 
 # `scripts/` is not an importable package (no __init__, and CI installs the repo
 # as a wheel where scripts/ isn't shipped) — load run_paper.py by file path, the
@@ -49,7 +50,6 @@ def _load_run_paper() -> ModuleType:
 
 
 run_paper = _load_run_paper()
-from services.trader.training.regime import detector_features
 
 # ---------------------------------------------------------------------------
 # Synthetic OHLCV builders (frame shape mirrors execution/tests/test_signal.py)
