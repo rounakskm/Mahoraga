@@ -97,11 +97,18 @@ services:
       HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:${HINDSIGHT_DB_PASSWORD}@hindsight-db:5432/hindsight
       HINDSIGHT_API_VECTOR_EXTENSION: vchord
       HINDSIGHT_API_TEXT_SEARCH_EXTENSION: vchord
-      # LLM (reflect/synthesis) routed through our LiteLLM gateway -> Nemotron.
+      # LLM for fact-extraction on retain + reflect/synthesis, via our LiteLLM
+      # gateway. MUST be an INSTRUCT model, NOT a reasoning model: Nemotron &
+      # other reasoning models emit thinking tokens that Hindsight's fact parser
+      # cannot read, so extraction silently yields 0 facts and memory never
+      # becomes recallable (verified 2026-07-18 — nemotron-nano extracts 0,
+      # gemma4 extracts clean facts). Local Ollama gemma4 is the designed choice
+      # (zero cost, no rate limit); Ollama must be serving. Override via
+      # HINDSIGHT_LLM_MODEL (e.g. anthropic/claude-* for a hosted instruct model).
       HINDSIGHT_API_LLM_PROVIDER: openai            # LiteLLM is OpenAI-compatible
       HINDSIGHT_API_LLM_BASE_URL: http://litellm:4000/v1
       HINDSIGHT_API_LLM_API_KEY: ${LITELLM_MASTER_KEY}
-      HINDSIGHT_API_LLM_MODEL: ${MAIN_MODEL:-nvidia/nemotron-ultra}
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_LLM_MODEL:-ollama/gemma4}
       # Embeddings: Hindsight's built-in LOCAL model (sentence-transformers on CPU).
       # NOT routed through LiteLLM — NVIDIA's nv-embedqa-* models are asymmetric and
       # require an `input_type` param the OpenAI embeddings API can't carry. bge-small

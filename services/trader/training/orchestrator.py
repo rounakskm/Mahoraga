@@ -190,10 +190,16 @@ class Orchestrator:
             recorded += 1
 
             # Archivist: Hindsight Experience Fact (optional / graceful-offline).
+            # NOTE: the text MUST be a natural-language sentence — Hindsight's
+            # fact-extractor yields 0 facts from terse "key=value" strings, so a
+            # cryptic summary would store but never become recallable knowledge
+            # (verified 2026-07-18). Write it the way a human analyst would.
             if self.hindsight is not None:
+                verdict = "was promoted" if report.promoted else "was rejected"
                 self.hindsight.retain(
-                    f"iteration {h}: fitness={report.fitness:.4f} "
-                    f"promoted={report.promoted} reason={report.reason}",
+                    f"During the {cadence} autoresearch cadence, strategy candidate "
+                    f"{h} {verdict} with a fitness score of {report.fitness:.4f}. "
+                    f"The evaluation verdict was: {report.reason}.",
                     {"candidate_hash": h, "run_id": self.run_id, "cadence": cadence},
                 )
 

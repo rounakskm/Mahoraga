@@ -40,7 +40,7 @@ class HindsightClient:
         base_url: str | None = None,
         bank: str = "mahoraga-trader",
         *,
-        timeout: float = 5.0,
+        timeout: float = 60.0,
     ) -> None:
         self.base_url = base_url.rstrip("/") if base_url else None
         self.bank = bank
