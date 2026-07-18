@@ -264,6 +264,24 @@ daily paper cadence auto-adopts the best vault-holder → performance accumulate
 convergence report reads it. What's left is not code: elapsed paper days + the human
 real-capital sign-off.
 
+## Production training — running (2026-07-18)
+
+The loop is training for real with memory on. Current honest state:
+- **Back pocket: 4 vault-holding strategies** across all regimes. A 6-seed campaign
+  found all vault-HOLD but **converged to ~2 optima** — the regime-conditional-SMA
+  template has a small optimum set; genuine strategy *diversity* needs a richer template
+  family (mean-reversion/breakout/…), a research extension, not a missing feature.
+- **Memory accumulating.** `retain` is now **async/non-blocking** (submit ~30ms, Hindsight's
+  worker pool extracts in the background) so training runs at full speed. A fleet replay
+  queued ~240 Experience Facts; the bank drains them at gemma4-cpu extraction speed
+  (the throughput limit — a GPU/hosted instruct model would drain faster).
+- **Convergence (auto-gathered, real data):** deployment-eligible ✅ (4), replay-depth ✅
+  (11.5yr), regime-coverage ✅ (all 4); kb_depth ⏳ (13 recallable + ~240 draining → 100),
+  paper-window ⏳ (2/30 days), paper-Sharpe ⏳. VERDICT: NOT READY — honestly.
+
+The three FAILs are all runtime/time (kb draining, paper days elapsing) or the human gate —
+none are code. `docs/convergence/2026-07-18-report.md` is the live scorecard.
+
 ## Current focus
 
 **Phases 1–6 code-complete; the 30-day paper window is live.** Trains on ~5yr real SPY regimes, reads real news
