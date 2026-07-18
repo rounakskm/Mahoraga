@@ -30,9 +30,15 @@ LOG="data/logs/paper_window.log"
         # Morning cycle branch — market days only (launchd StartCalendarInterval
         # cannot express per-entry weekday filters, so the guard lives here).
         if [[ $(date +%u) -lt 6 ]]; then
+            # 1) refresh live news → World Facts + per-symbol sentiment snapshot
+            #    (the Phase-4 "sentiment every 15 min" cadence via periodic REST)
+            uv run python scripts/run_intel.py refresh --symbols SPY QQQ IWM || true
+            # 2) the multi-symbol signal-driven live-paper cycle over the watchlist;
+            #    each symbol passes the portfolio-wide firewall independently.
             uv run python scripts/run_paper.py cycle \
-                --strategy "${MAHORAGA_PAPER_STRATEGY:-strategies/seed4-1782849823.json}" \
+                --strategy "${MAHORAGA_PAPER_STRATEGY:-strategies/seed11-1783928660.json}" \
                 --signal \
+                --watchlist \
                 --live-orders
         else
             echo "weekend — skipping cycle"
