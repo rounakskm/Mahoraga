@@ -87,3 +87,7 @@ reads the paper window's outcomes from Postgres:
 
 30 days of clean `pnl_daily` rows is the operational exit criterion for the
 window; real capital remains a human gate.
+
+## Tier-3 update: multi-symbol + news refresh
+
+The daily cadence (`scripts/paper_window.sh`) now (1) runs `run_intel.py refresh --symbols SPY QQQ IWM` to pull live news into World Facts + per-symbol sentiment snapshots, then (2) runs the **multi-symbol** cycle `run_paper.py cycle --signal --watchlist` over SPY/QQQ/IWM/XLK/XLE/XLF/XLV — each symbol clears the portfolio-wide hard-limit firewall independently. Default strategy is `strategies/seed11-1783928660.json` (override via `MAHORAGA_PAPER_STRATEGY`).

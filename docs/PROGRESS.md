@@ -201,6 +201,41 @@ everything-is-high-vol labeling). Swap verified with a dry-run: the account's ex
 3-SPY long matched seed11's signal — book aligned, zero churn. `MAHORAGA_PAPER_STRATEGY`
 updated in `.env`.
 
+## Tier 3 — feature-complete ✅ (2026-07-18)
+
+The deferred implementation is done — the app is now a real multi-symbol portfolio
+system with live intelligence cadences ([plan](superpowers/specs/tier-3-completion/plan.md)):
+- **Multi-symbol trading** — `run_paper.py cycle --watchlist` runs the strategy across
+  SPY/QQQ/IWM + XLK/XLE/XLF/XLV through ONE portfolio-aware `Executor.run_cycle` (the
+  executor was already multi-intent). Live-data proof: 7 symbols, distinct regimes, 4
+  dry-submits, XLF auto-rejected (regime confidence 35% < 40% floor). Sector cap enforced
+  portfolio-wide.
+- **Researcher pipeline** — macro sources → structured hypotheses (rate_path/event/…),
+  Hindsight-grounded, `to_planner_queue` seeds the fleet. Closes the last Phase-4 stub.
+- **Live news refresh** — `run_intel.py refresh` = periodic ingest → World Facts +
+  per-symbol sentiment snapshot (the Phase-4 15-min cadence via periodic REST).
+- **FedWatch endpoint** — best-effort real source + honest source label (degrades to {},
+  never fabricates).
+- **Cadence** — `paper_window.sh` now runs a news refresh then the multi-symbol cycle.
+
+**Deliberately deferred** (documented, not silent): FinBERT (lexicon meets the <2s SLA),
+held-open websocket (periodic REST suffices locally), per-symbol retraining (the strategy
+is symbol-agnostic). See the plan self-review.
+
+**Tier-2 soak:** a 42-step fleet replay across 2021→2026 recorded 161 iterations; the
+Guardian veto rate is textbook regime-sensitive — heavy in the 2022 bear, ~zero in the
+2024–25 bull. That provenance feeds the convergence report's replay-depth + regime
+coverage.
+
+## The only remaining gates (uncompressible by design)
+
+1. **~30 elapsed paper-trading days** — the convergence report needs the window to
+   accumulate; this is calendar time, not code. Install the launchd cadence to advance it.
+2. **Human real-capital sign-off** — a passing convergence report is necessary but never
+   sufficient; the flip to real money is always yours.
+
+Everything buildable is built. The app is feature-complete and usable today.
+
 ## Current focus
 
 **Phases 1–6 code-complete; the 30-day paper window is live.** Trains on ~5yr real SPY regimes, reads real news
