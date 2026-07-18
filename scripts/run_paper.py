@@ -52,6 +52,11 @@ from pathlib import Path
 import httpx
 import pandas as pd
 
+from services.trader.execution.active_strategy import (
+    ActiveStrategy,
+    select_active_strategy,
+    write_active,
+)
 from services.trader.execution.alpaca_broker import AlpacaBrokerClient
 from services.trader.execution.calendar_gate import EconCalendarGate
 from services.trader.execution.compliance import ComplianceEngine
@@ -69,6 +74,7 @@ from services.trader.execution.watchlist import (
     sector_for,
     signals_for,
 )
+from services.trader.ops.audit import AuditLog
 from services.trader.ops.halt import HaltControl
 
 logger = logging.getLogger("run_paper")
@@ -78,6 +84,62 @@ _DEFAULT_DATA_ENDPOINT = "https://data.alpaca.markets"
 
 # The single symbol this Phase-5 smoke trades, and its sector for the 20% cap.
 _SECTOR_MAP = {"SPY": "ETF"}
+
+# The conductor writes the adopted artifact here (read by `_load_artifact`), and
+# tracks the last-adopted candidate_hash so a re-adopt of the SAME strategy does
+# NOT spam the audit chain.
+_ACTIVE_ARTIFACT_PATH = Path("strategies/active.json")
+_ACTIVE_STATE_PATH = Path("data/control/active_strategy.txt")
+
+
+def _adopt_from_registry(
+    dsn: str | None,
+    *,
+    artifact_path: Path = _ACTIVE_ARTIFACT_PATH,
+    state_path: Path = _ACTIVE_STATE_PATH,
+) -> Path | None:
+    """Select + deploy the best vault-validated registry strategy.
+
+    Returns the written artifact path (ready for `_load_artifact`), or None when
+    there is no deployment-eligible strategy — the caller then skips gracefully.
+
+    The train->promote->deploy handoff is audited ONCE per change: the selected
+    `candidate_hash` is compared against `state_path` (the last adopted one); on
+    a change we append a `strategy_adopted` event and rewrite the state file, on
+    an unchanged hash we proceed silently (no audit spam). `AuditLog` with no DSN
+    is already a graceful no-op, so the audit line just doesn't persist offline.
+    """
+    strat = select_active_strategy(dsn)
+    if strat is None:
+        return None
+    write_active(strat, out_path=artifact_path)
+    _audit_adoption(strat, dsn, state_path=state_path)
+    return artifact_path
+
+
+def _audit_adoption(
+    strat: ActiveStrategy, dsn: str | None, *, state_path: Path = _ACTIVE_STATE_PATH
+) -> bool:
+    """Audit a strategy adoption iff its candidate_hash changed since last time.
+
+    Reads the previous hash from `state_path`, compares, and on a change writes
+    an `AuditLog.append("strategy_adopted", ...)` event + rewrites the state
+    file + prints the adopt line. Same hash -> no-op, returns False. Returns True
+    when a (new) adoption was recorded.
+    """
+    previous = state_path.read_text(encoding="utf-8").strip() if state_path.exists() else None
+    if previous == strat.candidate_hash:
+        return False
+
+    AuditLog(dsn).append(
+        "strategy_adopted",
+        {"candidate_hash": strat.candidate_hash, "vault_sharpe": strat.vault_sharpe},
+    )
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(strat.candidate_hash, encoding="utf-8")
+    sharpe = "n/a" if strat.vault_sharpe is None else f"{strat.vault_sharpe:.3f}"
+    print(f"adopted {strat.candidate_hash} (vault Sharpe {sharpe})")
+    return True
 
 
 def _broker() -> AlpacaBrokerClient:
@@ -471,8 +533,23 @@ def _cmd_cycle_watchlist(args: argparse.Namespace, artifact: dict, path: Path) -
 
 
 def cmd_cycle(args: argparse.Namespace) -> int:
-    """Run ONE execution cycle for a strategy artifact; print the CycleReport."""
-    path = Path(args.strategy)
+    """Run ONE execution cycle for a strategy artifact; print the CycleReport.
+
+    The artifact comes either from an explicit `--strategy PATH` (manual pin) or,
+    with `--from-registry`, from the conductor's auto-adopt: the best
+    deployment-eligible `strategies.registry` strategy is written to
+    `strategies/active.json` and used as the artifact. Exactly one source is
+    given (enforced by the parser); `--from-registry` with no eligible strategy
+    is a graceful exit 0. Both sources then flow through the identical
+    single-symbol / `--watchlist` path below.
+    """
+    if args.from_registry:
+        path = _adopt_from_registry(os.environ.get("MAHORAGA_DSN"))
+        if path is None:
+            print("no deployment-eligible strategy in registry; nothing to trade")
+            return 0
+    else:
+        path = Path(args.strategy)
     if not path.exists():
         print(f"strategy artifact not found: {path}; nothing to run")
         return 0
@@ -657,8 +734,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_positions.set_defaults(func=cmd_positions)
 
     p_cycle = sub.add_parser("cycle", help="run ONE execution cycle for a strategy")
-    p_cycle.add_argument(
-        "--strategy", required=True, help="path to a promoted strategy artifact (JSON)"
+    # Exactly one strategy source: an explicit artifact PATH, or auto-adopt the
+    # best vault-validated registry strategy. The mutually-exclusive group is
+    # `required`, so `cycle` with neither errors clearly (as `--strategy` did).
+    src = p_cycle.add_mutually_exclusive_group(required=True)
+    src.add_argument(
+        "--strategy", help="path to a promoted strategy artifact (JSON)"
+    )
+    src.add_argument(
+        "--from-registry",
+        action="store_true",
+        default=False,
+        help="AUTO-ADOPT: deploy the best deployment-eligible strategies.registry "
+        "strategy (vault_sharpe DESC NULLS LAST, train_sharpe DESC) written to "
+        "strategies/active.json; audits the handoff when the adopted candidate "
+        "changes. No eligible strategy -> graceful skip (exit 0)",
     )
     p_cycle.add_argument(
         "--price",
